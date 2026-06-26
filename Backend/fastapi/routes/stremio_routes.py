@@ -1,0 +1,725 @@
+from fastapi import APIRouter, HTTPException, Depends, Request
+from typing import Optional
+from urllib.parse import unquote, quote
+from Backend.config import Telegram
+from Backend.helper.settings_manager import SettingsManager
+from Backend import db, __version__
+import PTN
+from fastapi.responses import HTMLResponse, JSONResponse
+from datetime import datetime, timezone, timedelta
+from Backend.fastapi.security.tokens import verify_token
+from Backend.logger import LOGGER
+from Backend.helper.global_search import global_search, is_global_search_enabled
+from Backend.helper.public_url import delivery_url, public_base_url
+from Backend.helper.split_files import strip_part_suffix
+
+router = APIRouter(prefix="/stremio", tags=["Stremio Addon"])
+
+# --- Configuration ---
+ADDON_NAME = "Stremio-TG"
+ADDON_VERSION = __version__
+PAGE_SIZE = 15
+
+# Define available genres
+GENRES = [
+    "Action", "Adventure", "Animation", "Biography", "Comedy",
+    "Crime", "Documentary", "Drama", "Family", "Fantasy",
+    "History", "Horror", "Music", "Mystery", "Romance",
+    "Sci-Fi", "Sport", "Thriller", "War", "Western"
+]
+
+# --------------- Helper Functions -----------------
+
+def convert_to_stremio_meta(item: dict) -> dict:
+    media_type = "series" if item.get("media_type") == "tv" else "movie"
+    
+    meta = {
+        "id": item.get('imdb_id'),
+        "type": media_type,
+        "name": item.get("title"),
+        "poster": item.get("poster") or "",
+        "logo": item.get("logo") or "",
+        "year": item.get("release_year"),
+        "releaseInfo": str(item.get("release_year", "")),
+        "imdb_id": item.get("imdb_id", ""),
+        "moviedb_id": item.get("tmdb_id", ""),
+        "background": item.get("backdrop") or "",
+        "genres": item.get("genres") or [],
+        "imdbRating": str(item.get("rating") or ""),
+        "description": item.get("description") or "",
+        "cast": item.get("cast") or [],
+        "runtime": item.get("runtime") or "",
+    }
+    return meta
+
+
+def format_released_date(media):
+    year = media.get("release_year")
+    if year:
+        try:
+            return datetime(int(year), 1, 1).isoformat() + "Z"
+        except:
+            return None
+    return None
+
+def format_stream_details(
+    filename: str,
+    quality: str,
+    size: str,
+    is_split: bool = False,
+    split_kind: str | None = None,
+) -> tuple[str, str]:
+    size_emoji = "🗜️" if split_kind == "zip" else ("📦" if is_split else "💾")
+    display_filename = strip_part_suffix(filename) if is_split else filename
+    try:
+        parsed = PTN.parse(display_filename)
+    except Exception:
+        compact_quality = str(quality or "").strip()
+        stream_name = f"[{ADDON_NAME}] • {compact_quality}" if compact_quality else ADDON_NAME
+        return (stream_name, f"📁 {display_filename}\n{size_emoji} {size}")
+
+    codec_parts = []
+    if parsed.get("codec"):
+        codec_parts.append(f"🎥 {parsed.get('codec')}")
+    if parsed.get("bitDepth"):
+        codec_parts.append(f"🌈 {parsed.get('bitDepth')}bit")
+    if parsed.get("audio"):
+        codec_parts.append(f"🔊 {parsed.get('audio')}")
+    if parsed.get("encoder"):
+        codec_parts.append(f"👤 {parsed.get('encoder')}")
+
+    codec_info = " ".join(codec_parts) if codec_parts else ""
+
+    resolution = str(parsed.get("resolution", quality) or "").strip()
+    quality_type = str(parsed.get("quality", "") or "").strip()
+    stream_detail = " ".join(part for part in (resolution, quality_type) if part)
+    stream_name = f"[{ADDON_NAME}] • {stream_detail}" if stream_detail else ADDON_NAME
+
+    stream_title_parts = [
+        f"📁 {display_filename}",
+        f"{size_emoji} {size}",
+    ]
+    if codec_info:
+        stream_title_parts.append(codec_info)
+
+    stream_title = "\n".join(stream_title_parts)
+    return (stream_name, stream_title)
+
+
+def get_resolution_priority(stream_name: str) -> int:
+    resolution_map = {
+        "2160p": 2160, "4k": 2160, "uhd": 2160,
+        "1080p": 1080, "fhd": 1080,
+        "720p": 720, "hd": 720,
+        "480p": 480, "sd": 480,
+        "360p": 360,
+    }
+    for res_key, res_value in resolution_map.items():
+        if res_key in stream_name.lower():
+            return res_value
+    return 1
+
+# ------------------ Routes -----------------------
+
+@router.get("/{token}/manifest.json")
+async def get_manifest(token: str, request: Request, token_data: dict = Depends(verify_token)):
+    if SettingsManager.current().hide_catalog:
+        resources = ["stream", "subtitles"]
+        catalogs = []
+    else:
+        resources = ["catalog", "meta", "stream", "subtitles"]
+        catalogs = [
+            {
+                "type": "movie",
+                "id": "latest_movies",
+                "name": "Latest",
+                "extra": [
+                    {"name": "genre", "isRequired": False, "options": GENRES},
+                    {"name": "skip"}
+                ],
+                "extraSupported": ["genre", "skip"]
+            },
+            {
+                "type": "movie",
+                "id": "top_movies",
+                "name": "Popular",
+                "extra": [
+                    {"name": "genre", "isRequired": False, "options": GENRES},
+                    {"name": "skip"},
+                    {"name": "search", "isRequired": False}
+                ],
+                "extraSupported": ["genre", "skip", "search"]
+            },
+            {
+                "type": "series",
+                "id": "latest_series",
+                "name": "Latest",
+                "extra": [
+                    {"name": "genre", "isRequired": False, "options": GENRES},
+                    {"name": "skip"}
+                ],
+                "extraSupported": ["genre", "skip"]
+            },
+            {
+                "type": "series",
+                "id": "top_series",
+                "name": "Popular",
+                "extra": [
+                    {"name": "genre", "isRequired": False, "options": GENRES},
+                    {"name": "skip"},
+                    {"name": "search", "isRequired": False}
+                ],
+                "extraSupported": ["genre", "skip", "search"]
+            }
+        ]
+
+        try:
+            custom_catalogs = await db.get_custom_catalogs(visible_only=True)
+            for catalog in custom_catalogs:
+                catalog_id = str(catalog.get("_id"))
+                catalog_name = catalog.get("name") or "Custom Catalog"
+                catalogs.append({
+                    "type": "movie",
+                    "id": f"custom_{catalog_id}",
+                    "name": catalog_name,
+                    "extra": [{"name": "skip"}],
+                    "extraSupported": ["skip"],
+                })
+                catalogs.append({
+                    "type": "series",
+                    "id": f"custom_{catalog_id}",
+                    "name": catalog_name,
+                    "extra": [{"name": "skip"}],
+                    "extraSupported": ["skip"],
+                })
+        except Exception:
+            pass
+
+
+    addon_name = ADDON_NAME
+    addon_desc = "Streams movies and series through Stremio-TG."
+    addon_version = ADDON_VERSION
+    expiry_obj = None
+
+    if SettingsManager.current().subscription:
+        user_id = token_data.get("user_id")
+        if user_id:
+            try:
+                user = await db.get_user(int(user_id))
+                if user and user.get("subscription_status") == "active":
+                    expiry_obj = user.get("subscription_expiry")
+                    if expiry_obj:
+                        expiry_str = expiry_obj.strftime("%d %b %Y").lstrip("0")
+                        addon_name = f"{ADDON_NAME} — Expires {expiry_str}"
+                        addon_desc = (
+                            f"📅 Subscription active until {expiry_str}.\n"
+                            f"Streams movies and series through Stremio-TG."
+                        )
+                        epoch_tag = format(int(expiry_obj.timestamp()) & 0xFFFF, "x")
+                        addon_version = f"{ADDON_VERSION}-{epoch_tag}"
+                    else:
+                        addon_name = f"{ADDON_NAME} — Active"
+                        addon_desc = "✅ Subscription active.\nStreams movies and series through Stremio-TG."
+            except Exception:
+                pass
+
+    addon_base_url = public_base_url(request)
+    configure_url = f"{addon_base_url}/stremio/{token}/configure"
+
+    return JSONResponse(
+        content={
+        "id": f"telegram.media.{token[:8]}",
+        "version": addon_version,
+        "name": addon_name,
+        "logo": "https://i.postimg.cc/XqWnmDXr/Picsart-25-10-09-08-09-45-867.png",
+        "description": addon_desc,
+        "types": ["movie", "series"],
+        "resources": resources,
+        "catalogs": catalogs,
+        "idPrefixes": ["tt"],
+        "behaviorHints": {
+            "configurable": True,
+            "configurationRequired": False
+        },
+        "config": [
+            {
+                "key": "manifest_url",
+                "title": "Your Addon URL (copy to reinstall)",
+                "type": "text",
+                "default": f"{addon_base_url}/stremio/{token}/manifest.json"
+            }
+        ]
+        },
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
+
+
+@router.get("/{token}/catalog/{media_type}/{id}/{extra:path}.json")
+@router.get("/{token}/catalog/{media_type}/{id}.json")
+async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str] = None, token_data: dict = Depends(verify_token)):
+    if SettingsManager.current().hide_catalog:
+        raise HTTPException(status_code=404, detail="Catalog disabled")
+
+    if media_type not in ["movie", "series"]:
+        raise HTTPException(status_code=404, detail="Invalid catalog type")
+
+    genre_filter = None
+    search_query = None
+    stremio_skip = 0
+
+    if extra:
+        params = extra.replace("&", "/").split("/")
+        for param in params:
+            if param.startswith("genre="):
+                genre_filter = unquote(param.removeprefix("genre="))
+            elif param.startswith("search="):
+                search_query = unquote(param.removeprefix("search="))
+            elif param.startswith("skip="):
+                try:
+                    stremio_skip = int(param.removeprefix("skip="))
+                except ValueError:
+                    stremio_skip = 0
+
+    page = (stremio_skip // PAGE_SIZE) + 1
+
+    try:
+        if id.startswith("custom_"):
+            catalog_id = id.removeprefix("custom_")
+            catalog = await db.get_custom_catalog(catalog_id)
+            if not catalog or not catalog.get("visible", True):
+                return {"metas": []}
+
+            db_media_type = "tv" if media_type == "series" else "movie"
+            data = await db.get_custom_catalog_items(
+                catalog_id=catalog_id,
+                media_type=db_media_type,
+                page=page,
+                page_size=PAGE_SIZE,
+            )
+            items = data.get("items", [])
+        elif search_query:
+            search_results = await db.search_documents(query=search_query, page=page, page_size=PAGE_SIZE)
+            all_items = search_results.get("results", [])
+            db_media_type = "tv" if media_type == "series" else "movie"
+            items = [item for item in all_items if item.get("media_type") == db_media_type]
+        else:
+            if "latest" in id:
+                sort_params = [("updated_on", "desc")]
+            elif "top" in id:
+                sort_params = [("rating", "desc")]
+            else:
+                sort_params = [("updated_on", "desc")]
+
+            if media_type == "movie":
+                data = await db.sort_movies(sort_params, page, PAGE_SIZE, genre_filter=genre_filter)
+                items = data.get("movies", [])
+            else:
+                data = await db.sort_tv_shows(sort_params, page, PAGE_SIZE, genre_filter=genre_filter)
+                items = data.get("tv_shows", [])
+    except Exception as e:
+        return {"metas": []}
+
+    metas = [convert_to_stremio_meta(item) for item in items]
+    return {"metas": metas}
+
+
+@router.get("/{token}/meta/{media_type}/{id}.json")
+async def get_meta(token: str, media_type: str, id: str, token_data: dict = Depends(verify_token)):
+    if SettingsManager.current().hide_catalog:
+        raise HTTPException(status_code=404, detail="Catalog disabled")
+
+    try:
+        imdb_id = id
+    except (ValueError, IndexError):
+        raise HTTPException(status_code=400, detail="Invalid Stremio ID format")
+
+    media = await db.get_media_details(imdb_id=imdb_id)
+    if not media:
+        return {"meta": {}}
+
+    meta_obj = {
+        "id": id,
+        "type": "series" if media.get("media_type") == "tv" else "movie",
+        "name": media.get("title", ""),
+        "description": media.get("description", ""),
+        "year": str(media.get("release_year", "")),
+        "imdbRating": str(media.get("rating", "")),
+        "genres": media.get("genres", []),
+        "poster": media.get("poster", ""),
+        "logo": media.get("logo", ""),
+        "background": media.get("backdrop", ""),
+        "imdb_id": media.get("imdb_id", ""),
+        "releaseInfo": str(media.get("release_year", "")),
+        "moviedb_id": media.get("tmdb_id", ""),
+        "cast": media.get("cast") or [],
+        "runtime": media.get("runtime") or "",
+    }
+
+    if media.get("media_type") == "movie":
+        released_date = format_released_date(media)
+        if released_date:
+            meta_obj["released"] = released_date
+
+    # --- Add Episodes ---
+    if media_type == "series" and "seasons" in media:
+        yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+        videos = []
+        for season in sorted(media.get("seasons", []), key=lambda s: s.get("season_number")):
+            for episode in sorted(season.get("episodes", []), key=lambda e: e.get("episode_number")):
+                episode_id = f"{id}:{season['season_number']}:{episode['episode_number']}"
+                videos.append({
+                    "id": episode_id,
+                    "title": episode.get("title", f"Episode {episode['episode_number']}"),
+                    "season": season.get("season_number"),
+                    "episode": episode.get("episode_number"),
+                    "overview": episode.get("overview") or "No description available for this episode yet.",
+                    "released": episode.get("released") or yesterday,
+                    "thumbnail": episode.get("episode_backdrop") or "https://raw.githubusercontent.com/weebzone/Colab-Tools/refs/heads/main/no_episode_backdrop.png",
+                    "imdb_id": episode.get("imdb_id") or media.get("imdb_id"),
+                })
+        meta_obj["videos"] = videos
+    return {"meta": meta_obj}
+
+async def _global_streams_for(request: Request, token: str, imdb_id: str, media_type: str, season_num: Optional[int], episode_num: Optional[int]) -> list:
+    """Builds Global Search stream entries for a catalog item that has no
+    local DB row at all. Since there's no local title to read, the
+    canonical title (and, for a specific episode, confirmation it exists)
+    is resolved from Cinemeta via Backend.helper.imdb — the same source
+    used everywhere else in this codebase for metadata."""
+    from Backend.helper.imdb import get_detail, get_season
+
+    imdb_media_type = "tvSeries" if media_type == "series" else "movie"
+
+    detail = await get_detail(imdb_id=imdb_id, media_type=imdb_media_type)
+    if not detail or not detail.get("title"):
+        return []
+
+    expected_title = detail["title"]
+    year = (detail.get("releaseDetailed") or {}).get("year") or None
+
+    if season_num is not None and episode_num is not None:
+        try:
+            await get_season(imdb_id=imdb_id, season_id=season_num, episode_id=episode_num)
+        except Exception:
+            pass  # best-effort only; absence doesn't block the search
+
+    try:
+        global_results = await global_search(
+            expected_title,
+            SettingsManager.current().auth_channels,
+            year=year,
+            season=season_num,
+            episode=episode_num,
+        )
+    except Exception as e:
+        LOGGER.error(f"[GLOBAL SEARCH] search failed for '{expected_title}': {e}")
+        return []
+
+    streams = []
+    for r in global_results:
+        _, stream_title = format_stream_details(r["title"], r["quality"], r["size"], is_split=False)
+        stream_name = f"🌐 GLOBAL {r['quality']}"
+        stream_title = f"{stream_title}\n📡 {r['source_chat']}"
+        url = delivery_url(request, token, r["token"], r["title"])
+        streams.append({"name": stream_name, "title": stream_title, "url": url})
+    return streams
+
+
+@router.get("/{token}/stream/{media_type}/{id}.json")
+async def get_streams(
+    token: str,
+    media_type: str,
+    id: str,
+    request: Request,
+    token_data: dict = Depends(verify_token)
+):
+
+    if token_data.get("subscription_expired"):
+        return {
+            "streams": [
+                {
+                    "name": "🚫 Subscription Expired",
+                    "title": "Your subscription has expired.\nRenew via the bot to continue watching.",
+                    "url": SettingsManager.current().subscription_url
+                }
+            ]
+        }
+
+    if token_data.get("limit_exceeded"):
+        limit_type = token_data["limit_exceeded"]
+
+        title = (
+            "🚫 Daily Limit Reached – Upgrade Required"
+            if limit_type == "daily"
+            else "🚫 Monthly Limit Reached – Upgrade Required"
+        )
+
+        return {
+            "streams": [
+                {
+                    "name": "Limit Reached",
+                    "title": title,
+                    "url": f"tg://user?id={Telegram.OWNER_ID}"
+                }
+            ]
+        }
+
+    try:
+        parts = id.split(":")
+        imdb_id = parts[0]
+        season_num = int(parts[1]) if len(parts) > 1 else None
+        episode_num = int(parts[2]) if len(parts) > 2 else None
+    except (ValueError, IndexError):
+        raise HTTPException(status_code=400, detail="Invalid Stremio ID format")
+
+    media_details = await db.get_media_details(
+        imdb_id=imdb_id,
+        season_number=season_num,
+        episode_number=episode_num,
+        media_type=media_type,
+    )
+
+    streams = []
+    local_qualities = list((media_details or {}).get("telegram") or [])
+    delivery_base = public_base_url(request)
+
+    if local_qualities:
+        for quality in local_qualities:
+            if quality.get("id"):
+                filename = quality.get("media_filename") or quality.get("name", "")
+                quality_str = quality.get("quality", "HD")
+                size = quality.get("size", "")
+
+                stream_name, stream_title = format_stream_details(
+                    filename,
+                    quality_str,
+                    size,
+                    is_split=bool(quality.get("group_key")),
+                    split_kind=quality.get("split_kind"),
+                )
+
+                original_url = delivery_url(
+                    request, token, quality.get("id"), "video.mkv"
+                )
+                proxy_url = f"{SettingsManager.current().http_proxy_url}{original_url}" if SettingsManager.current().http_proxy_url else None
+
+                if SettingsManager.current().show_proxy_and_non_proxy_both and proxy_url:
+                    streams.append({
+                        "name": f"{stream_name} (Proxy)",
+                        "title": stream_title,
+                        "url": proxy_url
+                    })
+                    streams.append({
+                        "name": f"{stream_name} (Direct)",
+                        "title": stream_title,
+                        "url": original_url
+                    })
+                elif proxy_url:
+                    streams.append({
+                        "name": stream_name,
+                        "title": stream_title,
+                        "url": proxy_url
+                    })
+                else:
+                    streams.append({
+                        "name": stream_name,
+                        "title": stream_title,
+                        "url": original_url
+                    })
+    else:
+        LOGGER.warning(
+            "[Stremio] local stream lookup: imdb=%s type=%s found=%s qualities=0",
+            imdb_id,
+            media_type,
+            bool(media_details),
+        )
+
+    if not streams and is_global_search_enabled():
+        # Not in the local catalog at all — resolve the real title via
+        # Cinemeta (we have no local DB row to read a title from) and
+        # search for it across the Userbot's channels instead.
+        try:
+            streams.extend(
+                await _global_streams_for(request, token, imdb_id, media_type, season_num, episode_num)
+            )
+        except Exception as e:
+            LOGGER.error(f"[GLOBAL SEARCH] stream search failed for {imdb_id}: {e}")
+
+    LOGGER.info(
+        "[Stremio] stream response: imdb=%s type=%s local_qualities=%s generated=%s host=%s",
+        imdb_id,
+        media_type,
+        len(local_qualities),
+        len(streams),
+        delivery_base.replace("https://", ""),
+    )
+
+    if not streams:
+        return JSONResponse(
+            content={"streams": []},
+            headers={"Cache-Control": "no-store, max-age=0"},
+        )
+
+    streams.sort(
+        key=lambda s: get_resolution_priority(s.get("name", "")),
+        reverse=True
+    )
+    name_count: dict = {}
+    for s in streams:
+        name_count[s["name"]] = name_count.get(s["name"], 0) + 1
+
+    seen: dict = {}
+    for s in streams:
+        if name_count[s["name"]] > 1:
+            seen[s["name"]] = seen.get(s["name"], 0) + 1
+            s["name"] = f"{s['name']} ({seen[s['name']]})"
+    return JSONResponse(
+        content={"streams": streams},
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
+
+@router.get("/{token}/configure")
+async def configure_addon(token: str, request: Request):
+    manifest_url = f"{public_base_url(request)}/stremio/{token}/manifest.json"
+    web_install_url = f"https://web.stremio.com/#/?addon_manifest={quote(manifest_url, safe='')}"
+
+    # Fetch user info for display
+    token_doc = await db.get_api_token(token)
+    user_name = "Unknown"
+    expiry_str = "N/A"
+    status_color = "#ef4444"
+    status_text = "Unknown"
+
+    if token_doc:
+        uid = token_doc.get("user_id")
+        if uid:
+            try:
+                user = await db.get_user(int(uid))
+                if user:
+                    user_name = user.get("first_name") or user.get("username") or f"User {uid}"
+                    sub_status = user.get("subscription_status", "")
+                    expiry = user.get("subscription_expiry")
+                    if expiry:
+                        expiry_str = expiry.strftime("%d %b %Y").lstrip("0")
+                    if sub_status == "active":
+                        status_color = "#22c55e"
+                        status_text = "✅ Active"
+                    else:
+                        status_color = "#ef4444"
+                        status_text = "🔴 Expired"
+            except Exception:
+                pass
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Update Stremio-TG Addon</title>
+  <style>
+    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    body {{
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0f0f1a; color: #e2e8f0;
+      min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      padding: 24px;
+    }}
+    .card {{
+      background: #1e1e2e; border: 1px solid #2d2d44; border-radius: 16px;
+      padding: 40px 32px; max-width: 480px; width: 100%; text-align: center;
+    }}
+    .logo {{ font-size: 48px; margin-bottom: 12px; }}
+    h1 {{ font-size: 1.5rem; font-weight: 700; color: #f8fafc; margin-bottom: 6px; }}
+    .sub-title {{ color: #94a3b8; font-size: 0.9rem; margin-bottom: 28px; }}
+    .info-row {{
+      display: flex; justify-content: space-between; align-items: center;
+      background: #2a2a3e; border-radius: 10px; padding: 12px 16px;
+      margin-bottom: 12px; font-size: 0.9rem;
+    }}
+    .info-label {{ color: #94a3b8; }}
+    .info-val {{ font-weight: 600; color: #f1f5f9; }}
+    .status-badge {{
+      display: inline-block; padding: 2px 10px; border-radius: 999px;
+      font-size: 0.8rem; font-weight: 700;
+      background: {status_color}22; color: {status_color};
+    }}
+    .btn-update {{
+      display: block; width: 100%;
+      background: linear-gradient(135deg, #7c3aed, #4f46e5);
+      color: white; font-weight: 700; font-size: 1rem;
+      padding: 14px 24px; border-radius: 12px; border: none;
+      cursor: pointer; text-decoration: none; margin: 28px 0 12px;
+      transition: opacity 0.2s;
+    }}
+    .btn-update:hover {{ opacity: 0.85; }}
+    .btn-web {{
+      display: block; color: #6366f1; font-size: 0.85rem;
+      text-decoration: underline; margin-bottom: 20px;
+    }}
+    .steps {{
+      background: #2a2a3e; border-radius: 10px; padding: 14px 18px;
+      margin: 16px 0; text-align: left; font-size: 0.85rem; color: #cbd5e1;
+    }}
+    .steps b {{ color: #f1f5f9; }}
+    .steps ol {{ margin-top: 8px; margin-left: 18px; line-height: 1.8; }}
+    .url-box {{
+      background: #111827; border: 1px solid #374151; border-radius: 8px;
+      padding: 10px 14px; font-family: monospace; font-size: 0.75rem;
+      color: #94a3b8; word-break: break-all; text-align: left; margin-top: 16px;
+    }}
+    .btn-copy {{
+      margin-top: 10px; width: 100%; padding: 10px;
+      background: #1e293b; border: 1px solid #374151; color: #94a3b8;
+      border-radius: 8px; cursor: pointer; font-size: 0.85rem; transition: all 0.2s;
+    }}
+    .btn-copy:hover {{ background: #334155; color: #f1f5f9; }}
+    .hint {{ color: #64748b; font-size: 0.78rem; margin-top: 6px; }}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">🎬</div>
+    <h1>Stremio-TG Addon</h1>
+    <p class="sub-title">Click the button below to install or update your addon in Stremio.</p>
+
+    <div class="info-row">
+      <span class="info-label">User</span>
+      <span class="info-val">{user_name}</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">Status</span>
+      <span class="status-badge">{status_text}</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">Expires</span>
+      <span class="info-val">{expiry_str}</span>
+    </div>
+
+    <a href="{web_install_url}" class="btn-update" target="_blank">
+      ⚡ Install / Update in Stremio
+    </a>
+
+    <div class="steps">
+      <b>Or install manually:</b>
+      <ol>
+        <li>Open Stremio → <b>Add-ons</b> tab</li>
+        <li>Click the <b>🔍 Search / URL</b> icon</li>
+        <li>Paste the URL below and press Enter</li>
+      </ol>
+    </div>
+
+    <div class="url-box" id="murl">{manifest_url}</div>
+    <button onclick="copyUrl()" class="btn-copy">📋 Copy URL</button>
+    <script>
+      function copyUrl() {{
+        navigator.clipboard.writeText('{manifest_url}').then(() => {{
+          const b = document.querySelector('.btn-copy');
+          b.textContent = '✅ Copied!';
+          setTimeout(() => b.textContent = '📋 Copy URL', 2000);
+        }});
+      }}
+    </script>
+  </div>
+</body>
+</html>"""
+    return HTMLResponse(html)

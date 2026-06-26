@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block title %}Sign in · TG Stremio{% endblock %}
+{% block extra_head %}
+<link rel="stylesheet" href="/static/css/pages/login.css?v=3.6.120">
+{% endblock %}
+
+{% block content %}
+<div class="auth-stage">
+  <section class="auth-panel">
+    <aside class="auth-story">
+      <div class="auth-brand"><span class="brand-mark"><i class="fa-solid fa-play"></i></span><span>TG STREMIO</span></div>
+      <div class="story-copy"><p class="eyebrow">Library control</p><h1>One place to run your Telegram library.</h1><p>Manage streams, media, subtitles, catalogs, and access from a private control workspace.</p></div>
+      <div class="story-status"><span><i></i> Secure admin area</span><small>Streaming control</small></div>
+    </aside>
+    <main class="auth-form-side">
+      <div class="auth-mobile-brand"><span class="brand-mark"><i class="fa-solid fa-play"></i></span><span>TG STREMIO</span></div>
+      <header><p class="eyebrow">Administrator</p><h2>Welcome back</h2><p>Enter your credentials to open the control workspace.</p></header>
+      {% if error %}<div class="auth-error"><i class="fa-solid fa-circle-exclamation"></i><span>{{ error }}</span></div>{% endif %}
+      <form method="post" class="auth-form">
+        <label><span>Username</span><div class="auth-input-wrap"><i class="fa-solid fa-user"></i><input class="login-input" type="text" name="username" autocomplete="username" placeholder="Admin username" required></div></label>
+        <label><span>Password</span><div class="auth-input-wrap"><i class="fa-solid fa-lock"></i><input class="login-input" id="password" type="password" name="password" autocomplete="current-password" placeholder="Password" required><button class="login-password-toggle" type="button" onclick="togglePassword()" aria-label="Show or hide password"><i id="eyeIcon" class="fa-solid fa-eye"></i></button></div></label>
+        <button class="auth-submit" type="submit"><span>Open workspace</span><i class="fa-solid fa-arrow-right"></i></button>
+      </form>
+      <p class="auth-footnote"><i class="fa-solid fa-shield-halved"></i> This panel is protected by your admin credentials.</p>
+    </main>
+  </section>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/static/js/pages/login.js?v=3.6.120" defer></script>
+{% endblock %}

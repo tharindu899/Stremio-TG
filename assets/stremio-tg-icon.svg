@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Stremio-TG app icon</title><desc id="desc">A cinematic play icon for the Telegram Stremio control room.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#07101f"/><stop offset=".55" stop-color="#142750"/><stop offset="1" stop-color="#24134d"/></linearGradient>
+    <linearGradient id="accent" x1=".08" y1=".05" x2=".94" y2=".97"><stop stop-color="#66ebff"/><stop offset=".52" stop-color="#7ea8ff"/><stop offset="1" stop-color="#aa79ff"/></linearGradient>
+    <filter id="shadow" x="-60%" y="-60%" width="220%" height="220%"><feDropShadow dx="0" dy="18" stdDeviation="17" flood-color="#000" flood-opacity=".40"/></filter>
+  </defs>
+  <rect width="512" height="512" rx="116" fill="url(#bg)"/>
+  <circle cx="408" cy="93" r="130" fill="#66ebff" opacity=".12"/>
+  <circle cx="78" cy="455" r="175" fill="#a778ff" opacity=".13"/>
+  <g opacity=".13" fill="none" stroke="#d4f8ff"><path d="M330 67C402 94 452 91 512 58"/><path d="M340 103c71 24 115 24 172-2"/></g>
+  <g transform="translate(75 75)" filter="url(#shadow)">
+    <rect width="362" height="362" rx="88" fill="#0b1731" stroke="#8deeff" stroke-opacity=".29" stroke-width="3"/>
+    <rect x="36" y="36" width="290" height="290" rx="67" fill="none" stroke="url(#accent)" stroke-opacity=".50" stroke-width="3"/>
+    <path d="M141 112c0-26 28-42 51-29l101 58c23 13 23 46 0 59l-101 58c-23 13-51-3-51-29V112z" fill="url(#accent)"/>
+    <path d="M181 117v106M149 170h64" stroke="#fff" stroke-width="13" stroke-linecap="round" opacity=".96"/>
+    <rect x="104" y="282" width="154" height="28" rx="14" fill="#7eefff" fill-opacity=".12" stroke="#7eefff" stroke-opacity=".36"/>
+    <text x="181" y="301" text-anchor="middle" fill="#cdf9ff" font-size="12" font-family="Arial, Helvetica, sans-serif" font-weight="800" letter-spacing="2.9">STREMIO-TG</text>
+  </g>
+</svg>

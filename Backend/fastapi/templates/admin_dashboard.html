@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block title %}System · TG Stremio{% endblock %}
+{% block extra_head %}
+<link rel="stylesheet" href="/static/css/pages/admin-dashboard.css?v=3.6.120">
+{% endblock %}
+
+{% block content %}
+<div class="system-console">
+  <header class="system-head page-topline">
+    <div>
+      <p class="eyebrow"><span></span> System control</p>
+      <h1>Operations</h1>
+      <p>Watch delivery health, stream activity, and dead-link cleanup from one system view.</p>
+    </div>
+    <div class="system-actions">
+      <button type="button" onclick="clearAnalytics()" class="system-button"><i class="fa-solid fa-chart-simple"></i> Reset analytics</button>
+      <button type="button" onclick="clearCache()" class="system-button danger"><i class="fa-solid fa-trash-can"></i> Clear file cache</button>
+    </div>
+  </header>
+
+  <section class="system-summary" id="stats-container">
+    <article class="summary-cell"><div class="summary-icon cache"><i class="fa-solid fa-database"></i></div><div><span>Cached file IDs</span><strong id="stat-cache-size">—</strong><small>Memory cache entries</small></div></article>
+    <article class="summary-cell"><div class="summary-icon bot"><i class="fa-solid fa-robot"></i></div><div><span>Connected bots</span><strong id="stat-bot-count">—</strong><small>Ready to serve media</small></div></article>
+  </section>
+
+  <section class="load-board">
+    <div class="board-head"><div><p class="block-kicker">Delivery fleet</p><h2>Bot health and load</h2><p>Current stream work is distributed across connected Telegram clients.</p></div><span class="live-tag"><i></i> Live</span></div>
+    <div id="stat-workloads" class="workload-space"><div class="loading-state"><i class="fa-solid fa-spinner fa-spin"></i> Loading delivery fleet</div></div>
+  </section>
+
+  <div class="system-columns">
+    <section class="activity-board">
+      <div class="board-head"><div><p class="block-kicker">Playback events</p><h2>Recent streams</h2><p>Transferred data, speed, duration, and current stream state.</p></div><span class="table-label">Latest</span></div>
+      <div class="operations-table desktop-table"><table><thead><tr><th>Stream</th><th>Title</th><th>Bot</th><th>Transfer</th><th>Speed</th><th>Duration</th><th>Status</th><th>Time</th></tr></thead><tbody id="analytics-tbody"><tr><td colspan="8" class="table-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading stream activity</td></tr></tbody></table></div>
+      <div id="analytics-mobile" class="operations-mobile"><div class="loading-state"><i class="fa-solid fa-spinner fa-spin"></i> Loading stream activity</div></div>
+    </section>
+
+    <section class="dead-board">
+      <div class="board-head"><div><p class="block-kicker">Repair queue</p><h2>Dead links</h2><p>Remove broken qualities before they reach Stremio users.</p></div><span class="table-label warning">Review</span></div>
+      <div class="operations-table desktop-table"><table><thead><tr><th>Title</th><th>Type</th><th>Quality</th><th>Added</th><th>Action</th></tr></thead><tbody id="dead-links-tbody"><tr><td colspan="5" class="table-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading dead links</td></tr></tbody></table></div>
+      <div id="dead-links-mobile" class="operations-mobile"><div class="loading-state"><i class="fa-solid fa-spinner fa-spin"></i> Loading dead links</div></div>
+    </section>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/static/js/pages/admin-dashboard.js?v=3.6.120" defer></script>
+{% endblock %}

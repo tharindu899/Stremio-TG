@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+
+{% block title %}Catalogs · TG Stremio{% endblock %}
+{% block extra_head %}
+<link rel="stylesheet" href="/static/css/pages/catalogs.css?v=3.6.120">
+{% endblock %}
+
+{% block content %}
+<div class="catalog-workbench">
+  <header class="catalog-header page-topline">
+    <div>
+      <p class="eyebrow"><i class="fa-solid fa-layer-group"></i> Curated discovery</p>
+      <h1>Catalog workbench</h1>
+      <p>Create the shelves users see in Stremio, or keep private lists for your own library workflow.</p>
+    </div>
+    <div class="catalog-stat-strip" aria-label="Catalog totals">
+      <div><strong id="stat-total">0</strong><span>Catalogs</span></div>
+      <div><strong id="stat-visible">0</strong><span>Visible</span></div>
+      <div><strong id="stat-items">0</strong><span>Titles</span></div>
+    </div>
+  </header>
+
+  <section class="automation-console">
+    <div class="automation-copy">
+      <p class="block-kicker">Automation rules</p>
+      <h2>Build selected language and provider shelves</h2>
+      <p>Choose what should be maintained automatically. Save your selection, then run a full rebuild when you want deleted choices removed.</p>
+    </div>
+    <div class="automation-actions">
+      <span id="auto-sync-status" class="sync-state">Checking status</span>
+      <button id="save-auto-settings-btn" onclick="saveAutoCatalogSettings()" class="button-outline"><i class="fa-solid fa-floppy-disk"></i> Save choices</button>
+      <button id="auto-sync-btn" onclick="runAutoSync(false)" class="button-outline"><i class="fa-solid fa-bolt"></i> Quick sync</button>
+      <button id="auto-rebuild-btn" onclick="runAutoSync(true)" class="button-solid"><i class="fa-solid fa-arrows-rotate"></i> Full rebuild</button>
+    </div>
+    <div id="auto-settings-list" class="automation-options">
+      <div class="skeleton-option"></div><div class="skeleton-option"></div><div class="skeleton-option"></div>
+    </div>
+  </section>
+
+  <div class="catalog-layout">
+    <aside class="catalog-side">
+      <section class="catalog-create">
+        <div class="subsection-head"><div><p class="block-kicker">New shelf</p><h2>Create catalog</h2></div><i class="fa-solid fa-plus"></i></div>
+        <form onsubmit="createCatalog(event)" class="catalog-form">
+          <label><span>Name</span><input id="catalog-name" placeholder="Example: Family movies" required></label>
+          <label class="visibility-toggle"><span><b>Show in Stremio</b><small>Hidden shelves remain in this panel only.</small></span><input id="catalog-visible" type="checkbox" checked><i></i></label>
+          <button type="submit" class="button-solid wide"><i class="fa-solid fa-plus"></i> Create catalog</button>
+        </form>
+      </section>
+
+      <section class="catalog-directory">
+        <div class="subsection-head"><div><p class="block-kicker">Saved shelves</p><h2>Your catalogs</h2></div><button type="button" onclick="loadCatalogs()" class="mini-icon" aria-label="Refresh catalogs"><i class="fa-solid fa-rotate-right"></i></button></div>
+        <div id="catalog-list-wrapper" class="catalog-list-wrapper collapsed"><div id="catalog-list" class="catalog-list"><div class="loading-entry">Loading catalogs</div></div></div>
+        <button id="catalog-expand-btn" onclick="toggleCatalogExpand()" class="show-all hidden">Show all catalogs <i class="fa-solid fa-chevron-down"></i></button>
+      </section>
+    </aside>
+
+    <section class="catalog-editor">
+      <header class="editor-header">
+        <div>
+          <div class="editor-badges"><span id="selected-visibility-pill" class="selection-chip hidden"></span><span id="selected-count-pill" class="selection-chip hidden"></span></div>
+          <p class="block-kicker">Shelf editor</p>
+          <h2 id="selected-title">Select a catalog</h2>
+          <p id="selected-subtitle">Choose a catalog from the left to add titles, remove titles, or change visibility.</p>
+        </div>
+        <button id="delete-catalog-btn" onclick="deleteSelectedCatalog()" class="button-danger hidden"><i class="fa-solid fa-trash"></i><span>Delete</span></button>
+      </header>
+
+      <div id="catalog-empty-guide" class="editor-empty"><i class="fa-solid fa-folder-open"></i><h3>Your workspace is ready</h3><p>Select an existing shelf or create a new one to start curating content.</p></div>
+
+      <div id="catalog-workspace" class="hidden editor-workspace">
+        <div class="library-finder">
+          <div class="finder-title"><div><p class="block-kicker">Library search</p><h3>Add a title</h3></div><span>Search your indexed media</span></div>
+          <div class="finder-row">
+            <label class="finder-input"><i class="fa-solid fa-magnifying-glass"></i><input id="search-query" placeholder="Search title" onkeydown="if(event.key === 'Enter') searchMedia()"></label>
+            <select id="search-media-type" aria-label="Media type"><option value="movie">Movies</option><option value="tv">Series</option></select>
+            <button type="button" onclick="searchMedia()" class="button-solid">Search</button>
+          </div>
+          <div id="search-results-wrap" class="hidden search-results-block"><div class="results-label"><strong>Search results</strong><button type="button" onclick="clearSearchResults()">Clear</button></div><div id="search-results" class="media-result-grid"></div></div>
+        </div>
+        <div class="catalog-titles">
+          <div class="titles-head"><div><p class="block-kicker">Current titles</p><h3>Inside this catalog</h3></div><button type="button" onclick="loadCatalogItems()" class="button-outline"><i class="fa-solid fa-rotate-right"></i> Refresh</button></div>
+          <div id="catalog-items" class="media-result-grid"></div>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/static/js/pages/catalogs.js?v=3.6.120" defer></script>
+{% endblock %}

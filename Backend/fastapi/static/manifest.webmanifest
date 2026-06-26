@@ -1,0 +1,16 @@
+{
+  "id": "/tg-stremio-control-room",
+  "name": "TG Stremio",
+  "short_name": "TG Stremio",
+  "description": "Telegram media library control room.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone"],
+  "background_color": "#101a2c",
+  "theme_color": "#101a2c",
+  "icons": [
+    {"src": "/static/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
+    {"src": "/static/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
+  ]
+}

@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+
+{% block title %}Subscriptions · TG Stremio{% endblock %}
+{% block extra_head %}
+<link rel="stylesheet" href="/static/css/pages/subscriptions.css?v=3.6.120">
+{% endblock %}
+
+{% block content %}
+<div class="subscriptions-page">
+  <header class="sub-page-head page-topline">
+    <div>
+      <p class="eyebrow"><i class="fa-solid fa-credit-card"></i> Access plans</p>
+      <h1>Subscriptions</h1>
+      <p>Build plans and manage subscriber access without leaving the library.</p>
+    </div>
+    <div class="page-actions">
+      <button type="button" onclick="fetchSubscribers()" class="btn btn-quiet"><i class="fa-solid fa-rotate-right"></i><span>Refresh</span></button>
+      <button type="button" onclick="openPlanModal()" class="btn btn-primary"><i class="fa-solid fa-plus"></i><span>New plan</span></button>
+    </div>
+  </header>
+
+  <section class="plan-studio surface-block">
+    <div class="block-head">
+      <div>
+        <p class="block-kicker">Plan studio</p>
+        <h2>Offer durations that fit your users</h2>
+      </div>
+      <span class="count-chip">Flexible pricing</span>
+    </div>
+    <div id="plans-container" class="plan-grid">
+      <div class="loading-slot"><i class="fa-solid fa-spinner fa-spin"></i> Loading plans</div>
+    </div>
+  </section>
+
+  <section class="subscribers-panel surface-block">
+    <div class="block-head subscriber-head">
+      <div>
+        <p class="block-kicker">Subscriber directory</p>
+        <h2>Manage access</h2>
+        <p class="block-note">Find a user, inspect their status, then extend, reduce, or revoke access.</p>
+      </div>
+      <div class="subscriber-filters">
+        <label class="filter-search"><i class="fa-solid fa-magnifying-glass"></i><input id="sub-search" type="search" placeholder="Name, username or ID" oninput="subPage=1; renderSubPage()"></label>
+        <div class="ui-choice-field">
+          <select id="sub-filter" class="ui-choice-select" onchange="subPage=1; renderSubPage()" aria-label="Filter subscribers">
+            <option value="all">All status</option>
+            <option value="active">Active</option>
+            <option value="expired">Expired</option>
+          </select>
+          <button type="button" id="sub-filter-trigger" class="ui-choice-trigger" onclick="openSubscriptionsChoice('sub-filter','Subscriber status')"><span>All status</span><i class="fa-solid fa-chevron-down"></i></button>
+        </div>
+        <div class="ui-choice-field">
+          <select id="sub-page-size" class="ui-choice-select" onchange="subPage=1; renderSubPage()" aria-label="Subscribers per page">
+            <option value="10">10 rows</option>
+            <option value="25">25 rows</option>
+            <option value="50">50 rows</option>
+          </select>
+          <button type="button" id="sub-page-size-trigger" class="ui-choice-trigger" onclick="openSubscriptionsChoice('sub-page-size','Rows per page')"><span>10 rows</span><i class="fa-solid fa-chevron-down"></i></button>
+        </div>
+      </div>
+    </div>
+
+    <div class="subscriber-table desktop-table-wrap">
+      <table>
+        <thead>
+          <tr><th>Subscriber</th><th>Status</th><th>Expiry</th><th class="align-right">Actions</th></tr>
+        </thead>
+        <tbody id="subscribers-tbody"><tr><td colspan="4" class="table-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading subscribers</td></tr></tbody>
+      </table>
+    </div>
+
+    <div id="subscribers-mobile" class="subscriber-mobile-list">
+      <div class="loading-slot"><i class="fa-solid fa-spinner fa-spin"></i> Loading subscribers</div>
+    </div>
+
+    <footer class="directory-footer" id="sub-pagination">
+      <p id="sub-page-info">Loading directory…</p>
+      <div class="pager-controls">
+        <button id="sub-btn-prev" onclick="subChangePage(-1)" class="pager-button"><i class="fa-solid fa-chevron-left"></i><span>Previous</span></button>
+        <strong id="sub-page-num"></strong>
+        <button id="sub-btn-next" onclick="subChangePage(1)" class="pager-button"><span>Next</span><i class="fa-solid fa-chevron-right"></i></button>
+      </div>
+    </footer>
+  </section>
+</div>
+
+<div id="plan-modal" class="fixed inset-0 hidden z-50 modal-backdrop items-end justify-center p-3 sm:p-5">
+  <div class="app-dialog plan-dialog">
+    <div class="dialog-handle"></div>
+    <div class="dialog-title-row">
+      <div><p class="block-kicker">Plan editor</p><h3 id="plan-modal-title">New plan</h3></div>
+      <button type="button" onclick="closePlanModal()" class="icon-action" aria-label="Close plan editor"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <form id="plan-form" onsubmit="submitPlanForm(event)" class="dialog-form">
+      <input type="hidden" id="plan-id">
+      <label><span>Duration in days</span><input type="number" id="plan-days" min="1" required placeholder="30"></label>
+      <label><span>Price</span><input type="number" id="plan-price" min="0" step="0.01" required placeholder="0.00"></label>
+      <div class="dialog-actions"><button type="button" onclick="closePlanModal()" class="btn btn-quiet">Cancel</button><button type="submit" class="btn btn-primary">Save plan</button></div>
+    </form>
+  </div>
+</div>
+
+<div id="user-modal" class="fixed inset-0 hidden z-50 modal-backdrop items-end justify-center p-3 sm:p-5">
+  <div class="app-dialog user-dialog">
+    <div class="dialog-handle"></div>
+    <div class="dialog-title-row">
+      <div><p class="block-kicker">Subscriber action</p><h3 id="user-modal-title">Manage user</h3><p id="user-modal-desc" class="dialog-copy"></p></div>
+      <button type="button" onclick="closeUserModal()" class="icon-action" aria-label="Close subscriber action"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <form id="user-form" onsubmit="submitUserForm(event)" class="dialog-form">
+      <input type="hidden" id="manage-user-id"><input type="hidden" id="manage-action">
+      <label id="days-input-group"><span>Days to <em id="days-action-label"></em></span><input type="number" id="manage-days" min="1" value="30"></label>
+      <div class="dialog-actions"><button type="button" onclick="closeUserModal()" class="btn btn-quiet">Cancel</button><button id="btn-user-save" type="submit" class="btn btn-primary">Confirm</button></div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/static/js/pages/subscriptions.js?v=3.6.120" defer></script>
+{% endblock %}

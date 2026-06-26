@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="{{ theme.colors.background }}">
+<meta name="color-scheme" content="dark light">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="application-name" content="TG Stremio">
+<meta name="apple-mobile-web-app-title" content="TG Stremio">
+<meta name="msapplication-TileColor" content="#101a2c">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/icons/icon-192.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/static/icons/apple-touch-icon.png">
+<meta name="tg-ui-version" content="3.6.10">
+<title>{% block title %}TG Stremio{% endblock %}</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://cdnjs.cloudflare.com">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" referrerpolicy="no-referrer"/>
+<style id="theme-tokens">:root{--primary:{{ theme.colors.primary }};--secondary:{{ theme.colors.secondary }};--accent:{{ theme.colors.accent }};--bg:{{ theme.colors.background }};--card:{{ theme.colors.card }};--border:{{ theme.colors.border }};--text:{{ theme.colors.text }};--text-sec:{{ theme.colors.text_secondary }};}</style>
+<script>tailwind.config={darkMode:'class',theme:{extend:{colors:{primary:'var(--primary)',secondary:'var(--secondary)',accent:'var(--accent)',background:'var(--bg)',card:'var(--card)',border:'var(--border)',text:'var(--text)','text-secondary':'var(--text-sec)'}}}};</script>
+<link rel="stylesheet" href="/static/css/app.css?v=3.6.120">
+{% block extra_head %}{% endblock %}
+</head>
+<body class="app-body{% if current_user %} app-authenticated{% else %} app-public{% endif %}" data-route="{{ request.url.path }}">
+<div class="app-grid" aria-hidden="true"></div>
+<div id="overlay" class="app-overlay" aria-hidden="true"></div>
+
+{% if current_user %}
+<div class="studio-shell">
+  <aside id="app-sidebar" class="command-rail" aria-label="Primary navigation">
+    <a href="/" class="rail-brand" aria-label="TG Stremio home"><span class="rail-brand-mark"><i class="fa-solid fa-play"></i></span><span class="rail-brand-pulse"></span><span class="sr-only">TG Stremio</span></a>
+    <nav class="rail-nav" aria-label="Workspace">
+      <div class="rail-group">
+        <span class="rail-caption">Workspace</span>
+        <a href="/" class="rail-link" data-nav-link data-tooltip="Overview"><i class="fa-solid fa-gauge-high"></i><span>Overview</span></a>
+        <a href="/media/manage" class="rail-link" data-nav-link data-tooltip="Media library"><i class="fa-solid fa-clapperboard"></i><span>Media Library</span></a>
+        <a href="/subtitles" class="rail-link" data-nav-link data-tooltip="Subtitles"><i class="fa-solid fa-closed-captioning"></i><span>Subtitles</span></a>
+        <a href="/catalogs" class="rail-link" data-nav-link data-tooltip="Catalogs"><i class="fa-solid fa-layer-group"></i><span>Catalogs</span></a>
+      </div>
+      <div class="rail-separator"></div>
+      <div class="rail-group">
+        <span class="rail-caption">Control</span>
+        <a href="/admin/dashboard" class="rail-link" data-nav-link data-tooltip="Operations"><i class="fa-solid fa-chart-line"></i><span>Operations</span></a>
+        <a href="/admin/tools" class="rail-link" data-nav-link data-tooltip="Scanner tools"><i class="fa-solid fa-magnifying-glass"></i><span>Scanner Tools</span></a>
+        <a href="/admin/access" class="rail-link" data-nav-link data-tooltip="Access"><i class="fa-solid fa-shield-halved"></i><span>Access</span></a>
+        <a href="/admin/subscriptions" class="rail-link" data-nav-link data-tooltip="Subscriptions"><i class="fa-solid fa-ticket"></i><span>Subscriptions</span></a>
+        <a href="/admin/settings" class="rail-link" data-nav-link data-tooltip="Settings"><i class="fa-solid fa-sliders"></i><span>Settings</span></a>
+      </div>
+    </nav>
+    <div class="rail-foot"><span class="rail-online-dot"></span><span class="rail-foot-label">Online</span></div>
+  </aside>
+
+  <section class="studio-stage">
+    <header class="studio-header">
+      <div class="header-start">
+        <button id="mobileNavBtn" class="header-icon mobile-only" type="button" aria-label="Open navigation" aria-controls="mobileDrawer" aria-expanded="false"><i class="fa-solid fa-bars"></i></button>
+        <div class="page-identity"><span class="page-kicker">TG STREMIO / CONTROL ROOM</span><strong id="topbarPageTitle">Overview</strong></div>
+      </div>
+      <div class="header-actions">
+        <a href="/admin/tools" class="header-status" title="Open Scanner Tools"><span class="status-signal"></span><span>System ready</span></a>
+        <div class="user-menu-wrap">
+          <button id="user-btn" class="profile-trigger" type="button" aria-haspopup="menu" aria-expanded="false"><span class="profile-avatar">{{ (current_user or 'A')[:1]|upper }}</span><span class="profile-name">{{ current_user }}</span><i class="fa-solid fa-chevron-down"></i></button>
+          <div id="user-dropdown" class="profile-popover" role="menu">
+            <div class="profile-popover-head"><span class="profile-avatar large">{{ (current_user or 'A')[:1]|upper }}</span><div><strong>{{ current_user }}</strong><small><span class="status-signal"></span> Administrator online</small></div></div>
+            <form method="post" action="/set-theme" class="appearance-control"><label for="theme-select">Appearance</label><div class="select-field"><select id="theme-select" name="theme" onchange="this.form.submit()">{% for theme_key, theme_data in themes.items() %}<option value="{{ theme_key }}" {% if current_theme==theme_key %}selected{% endif %}>{{ theme_data.name }}</option>{% endfor %}</select><i class="fa-solid fa-chevron-down"></i></div></form>
+            <a href="/admin/settings" class="profile-menu-link"><i class="fa-solid fa-gear"></i><span>Workspace settings</span></a>
+            <a href="/logout" class="profile-menu-link danger"><i class="fa-solid fa-arrow-right-from-bracket"></i><span>Sign out</span></a>
+          </div>
+        </div>
+      </div>
+    </header>
+    <main id="app-main" class="studio-main">
+{% else %}
+<div class="public-shell">
+  <header class="public-header"><a href="/" class="public-brand"><span class="rail-brand-mark"><i class="fa-solid fa-play"></i></span><span><strong>TG Stremio</strong><small>Media control room</small></span></a><span class="public-secure"><span class="status-signal"></span> Secure workspace</span></header>
+  <main id="app-main" class="public-main">
+{% endif %}
+{% block content %}{% endblock %}
+  </main>
+{% if current_user %}
+    <footer class="studio-footer"><span>Telegram Stremio</span><span>Private library control</span></footer>
+  </section>
+</div>
+
+<aside id="mobileDrawer" class="mobile-panel" aria-label="Navigation" aria-hidden="true">
+  <div class="mobile-panel-head">
+    <a href="/" class="mobile-panel-brand"><span class="rail-brand-mark"><i class="fa-solid fa-play"></i></span><span><strong>TG Stremio</strong><small>Control room</small></span></a>
+    <button id="mobileDrawerClose" class="header-icon" type="button" aria-label="Close navigation"><i class="fa-solid fa-xmark"></i></button>
+  </div>
+  <div class="mobile-panel-user"><span class="profile-avatar large">{{ (current_user or 'A')[:1]|upper }}</span><div><strong>{{ current_user }}</strong><small><span class="status-signal"></span> System ready</small></div></div>
+  <nav class="mobile-panel-nav" aria-label="Mobile workspace navigation">
+    <p class="mobile-panel-caption">Workspace</p>
+    <a href="/" class="mobile-panel-link" data-nav-link><i class="fa-solid fa-gauge-high"></i><span>Overview</span></a>
+    <a href="/media/manage" class="mobile-panel-link" data-nav-link><i class="fa-solid fa-clapperboard"></i><span>Media Library</span></a>
+    <a href="/subtitles" class="mobile-panel-link" data-nav-link><i class="fa-solid fa-closed-captioning"></i><span>Subtitles</span></a>
+    <a href="/catalogs" class="mobile-panel-link" data-nav-link><i class="fa-solid fa-layer-group"></i><span>Catalogs</span></a>
+    <p class="mobile-panel-caption control-caption">Control</p>
+    <a href="/admin/dashboard" class="mobile-panel-link" data-nav-link><i class="fa-solid fa-chart-line"></i><span>Operations</span></a>
+    <a href="/admin/tools" class="mobile-panel-link" data-nav-link><i class="fa-solid fa-magnifying-glass"></i><span>Scanner Tools</span></a>
+    <a href="/admin/access" class="mobile-panel-link" data-nav-link><i class="fa-solid fa-shield-halved"></i><span>Access</span></a>
+    <a href="/admin/subscriptions" class="mobile-panel-link" data-nav-link><i class="fa-solid fa-ticket"></i><span>Subscriptions</span></a>
+    <a href="/admin/settings" class="mobile-panel-link" data-nav-link><i class="fa-solid fa-sliders"></i><span>Settings</span></a>
+  </nav>
+  <div class="mobile-panel-foot"><a href="/logout" class="mobile-panel-link danger"><i class="fa-solid fa-arrow-right-from-bracket"></i><span>Sign out</span></a></div>
+</aside>
+{% else %}
+</div>
+{% endif %}
+<div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+<script src="/static/js/app.js?v=3.6.120" defer></script>
+{% block extra_scripts %}{% endblock %}
+</body>
+</html>

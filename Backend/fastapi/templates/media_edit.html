@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+
+{% block title %}Edit {{ media_type|title }} · TG Stremio{% endblock %}
+{% block extra_head %}
+<link rel="stylesheet" href="/static/css/pages/media-edit.css?v=3.6.120">
+{% endblock %}
+
+{% block content %}
+<div class="media-workspace">
+  <header class="page-topline media-page-head">
+    <div>
+      <a href="/media/manage?media_type={{ media_type }}" class="back-link"><i class="fa-solid fa-arrow-left"></i><span>Back to library</span></a>
+      <div class="page-overline"><i class="fa-solid fa-pen-ruler"></i> {{ media_type|title }} record</div>
+      <h1 class="page-title">Edit media</h1>
+      <p class="page-subtitle">Update metadata, repair a wrong match, manage custom catalogs, and control every indexed stream from one workspace.</p>
+    </div>
+    <div class="record-meta"><span><i class="fa-solid fa-fingerprint"></i> TMDb {{ tmdb_id }}</span><span><i class="fa-solid fa-database"></i> Storage {{ db_index }}</span></div>
+  </header>
+
+  {% if media_details %}
+  <section class="media-hero-card" aria-label="Current media record">
+    {% if media_details.backdrop %}
+    <img src="{{ media_details.backdrop }}" alt="" class="media-hero-backdrop" aria-hidden="true" onerror="this.remove()">
+    {% endif %}
+    <div class="media-hero-scrim"></div>
+    <div class="media-hero-content">
+      <div class="poster-frame">
+        <img src="{{ media_details.poster or '/static/placeholder.svg' }}" alt="{{ media_details.title }}" onerror="this.src='/static/placeholder.svg'">
+      </div>
+      <div class="media-summary">
+        <div class="media-kind"><i class="fa-solid {{ 'fa-film' if media_type == 'movie' else 'fa-tv' }}"></i> {{ media_type|title }}</div>
+        <h2>{{ media_details.title }}</h2>
+        <div class="media-facts">
+          {% if media_details.release_year %}<span>{{ media_details.release_year }}</span>{% endif %}
+          {% if media_details.rating %}<span><i class="fa-solid fa-star"></i> {{ media_details.rating }}</span>{% endif %}
+          {% if media_details.genres %}<span>{{ media_details.genres|length }} genre{{ 's' if media_details.genres|length != 1 else '' }}</span>{% endif %}
+        </div>
+        {% if media_details.genres %}
+        <div class="genre-line">
+          {% for genre in media_details.genres[:8] %}<span>{{ genre }}</span>{% endfor %}
+        </div>
+        {% endif %}
+        {% if media_details.description %}<p class="media-description">{{ media_details.description }}</p>{% endif %}
+      </div>
+    </div>
+  </section>
+  {% endif %}
+
+  <div class="editor-stack">
+    <section class="editor-panel metadata-panel">
+      <div class="panel-heading">
+        <div class="panel-title"><span class="panel-icon"><i class="fa-solid fa-pen-to-square"></i></span><div><h2>Record details</h2><p>These fields control the metadata shown in your Stremio library.</p></div></div>
+      </div>
+      <form id="edit-form" class="metadata-form" onsubmit="updateMedia(event)">
+        <label class="control-wide"><span>Title <b>*</b></span><input type="text" id="title" name="title" value="{{ media_details.title if media_details else '' }}" required></label>
+        <label><span>Release year <b>*</b></span><input type="number" id="release_year" name="release_year" value="{{ media_details.release_year if media_details else '' }}" required></label>
+        <label><span>Rating <em>0–10</em></span><input type="number" id="rating" name="rating" min="0" max="10" step="0.1" value="{{ media_details.rating if media_details else '' }}"></label>
+        <label class="control-wide"><span>Genres <em>comma separated</em></span><input type="text" id="genres" name="genres" value="{% if media_details and media_details.genres %}{{ media_details.genres|join(', ') }}{% endif %}" placeholder="Action, Drama, Mystery"></label>
+        <label class="control-wide"><span>Poster URL</span><input type="url" id="poster" name="poster" value="{{ media_details.poster if media_details else '' }}" placeholder="https://…"></label>
+        <label class="control-wide"><span>Backdrop URL</span><input type="url" id="backdrop" name="backdrop" value="{{ media_details.backdrop if media_details else '' }}" placeholder="https://…"></label>
+        <label class="control-wide"><span>Logo URL</span><input type="url" id="logo" name="logo" value="{{ media_details.logo if media_details else '' }}" placeholder="https://…"></label>
+        <label class="control-wide"><span>Description</span><textarea id="description" name="description" rows="5" placeholder="Short synopsis shown in Stremio">{{ media_details.description if media_details else '' }}</textarea></label>
+        <div class="form-actions control-wide"><button type="button" class="btn-ui btn-ghost" onclick="window.history.back()"><i class="fa-solid fa-xmark"></i> Cancel</button><button type="submit" class="btn-ui btn-primary"><i class="fa-solid fa-floppy-disk"></i> Save record</button></div>
+      </form>
+    </section>
+
+    {% if media_details %}
+    <section class="editor-panel">
+      <div class="panel-heading">
+        <div class="panel-title"><span class="panel-icon"><i class="fa-solid fa-wand-magic-sparkles"></i></span><div><h2>Repair metadata match</h2><p>Use this only when automatic detection selected the wrong title. Telegram files are not touched.</p></div></div>
+        <span class="panel-note">IMDb / TMDb</span>
+      </div>
+      <div class="rescan-search-row"><label class="search-control"><i class="fa-solid fa-magnifying-glass"></i><input id="rescan-query" type="search" value="{{ media_details.title }}" placeholder="Search the correct title"></label><button type="button" class="btn-ui btn-primary" onclick="searchRescanCandidates()"><i class="fa-solid fa-magnifying-glass"></i> Find match</button></div>
+      <p id="rescan-state" class="inline-state hidden"></p>
+      <div id="rescan-results" class="rescan-results"></div>
+      <div id="rescan-preview" class="rescan-preview hidden">
+        <img id="rescan-preview-poster" src="/static/placeholder.svg" alt="Selected poster" onerror="this.src='/static/placeholder.svg'">
+        <div><span class="preview-label">Selected match</span><h3 id="rescan-preview-title"></h3><p id="rescan-preview-subtitle"></p><small id="rescan-preview-ids"></small></div>
+        <div class="preview-actions"><button type="button" class="btn-ui btn-ghost" onclick="clearRescanSelection()">Clear</button><button type="button" class="btn-ui btn-primary" onclick="applyRescanSelection()"><i class="fa-solid fa-check"></i> Apply match</button></div>
+      </div>
+    </section>
+
+    <section class="editor-panel catalog-panel">
+      <div class="panel-heading">
+        <div class="panel-title"><span class="panel-icon"><i class="fa-solid fa-layer-group"></i></span><div><h2>Custom catalog placement</h2><p>Add or remove this title from an existing Stremio catalog.</p></div></div>
+        <a href="/catalogs" class="panel-link">Manage catalogs <i class="fa-solid fa-arrow-right"></i></a>
+      </div>
+      <div class="catalog-actions"><select id="custom-catalog-select" aria-label="Select custom catalog"><option value="">Loading catalogs…</option></select><button type="button" class="btn-ui btn-primary" onclick="addCurrentMediaToCatalog()"><i class="fa-solid fa-plus"></i> Add</button><button type="button" class="btn-ui btn-danger" onclick="removeCurrentMediaFromCatalog()"><i class="fa-solid fa-minus"></i> Remove</button></div>
+      <p id="custom-catalog-status" class="inline-state">Only visible catalogs are shown in Stremio. Hidden catalogs remain editable here.</p>
+    </section>
+
+    <section class="editor-panel content-panel">
+      <div class="panel-heading">
+        <div class="panel-title"><span class="panel-icon"><i class="fa-solid fa-hard-drive"></i></span><div><h2>Indexed files</h2><p>Manage the files currently available for this {{ media_type }}.</p></div></div>
+        {% if media_type == 'movie' and media_details.telegram %}<span class="panel-note">{{ media_details.telegram|length }} stream{{ 's' if media_details.telegram|length != 1 else '' }}</span>{% elif media_type == 'tv' and media_details.seasons %}<span class="panel-note">{{ media_details.seasons|length }} season{{ 's' if media_details.seasons|length != 1 else '' }}</span>{% endif %}
+      </div>
+
+      {% if media_type == 'movie' and media_details.telegram %}
+      <div class="stream-list">
+        {% for quality in media_details.telegram|sort(attribute='quality') %}
+        <article class="stream-row">
+          <div class="stream-row-primary"><span class="quality-mark">{{ quality.quality or 'AUTO' }}</span><div class="stream-row-copy"><div class="stream-meta"><strong>{{ quality.quality or 'Unknown quality' }}</strong><span class="file-size">{{ quality.size or 'Size unavailable' }}</span>{% if quality.parts %}<span class="split-part-count"><i class="fa-solid fa-layer-group"></i> {{ quality.parts|length }} parts</span>{% endif %}</div><p class="stream-filename" title="{{ quality.media_filename or quality.name }}">{{ quality.media_filename or quality.name }}</p></div></div>
+          <div class="stream-row-actions"><button type="button" class="btn-ui btn-success" onclick='copyStreamLink({{ quality.id|tojson }}, {{ (quality.media_filename or quality.name)|tojson }})'><i class="fa-regular fa-copy"></i><span>Copy</span></button><button type="button" class="btn-ui" onclick='runSpeedTest({{ quality.id|tojson }}, "movie", {{ quality.quality|default("Stream")|tojson }})'><i class="fa-solid fa-gauge-high"></i><span>Test</span></button><button type="button" class="btn-ui btn-danger" onclick='deleteQuality({{ quality.id|tojson }})'><i class="fa-solid fa-trash"></i><span>Delete</span></button></div>
+        </article>
+        {% endfor %}
+      </div>
+      {% elif media_type == 'tv' and media_details.seasons %}
+      <div class="season-list">
+        {% for season in media_details.seasons|sort(attribute='season_number') %}
+        <article class="season-card">
+          <button type="button" class="season-toggle" onclick="toggleSeason({{ loop.index0 }})" aria-controls="season-content-{{ loop.index0 }}"><span class="season-number">S{{ '%02d'|format(season.season_number) }}</span><span class="season-copy"><strong>Season {{ season.season_number }}</strong><small>{{ season.episodes|length }} episode{{ 's' if season.episodes|length != 1 else '' }}</small></span><i id="season-arrow-{{ loop.index0 }}" class="fa-solid fa-chevron-down"></i></button>
+          <div id="season-content-{{ loop.index0 }}" class="season-content">
+            <div class="episode-list">
+              {% for episode in season.episodes|sort(attribute='episode_number') %}
+              <article class="episode-card">
+                <div class="episode-head"><span class="episode-number">E{{ '%02d'|format(episode.episode_number) }}</span><div><strong>{{ episode.title }}</strong><small>{{ episode.telegram|length if episode.telegram else 0 }} stream{{ 's' if episode.telegram and episode.telegram|length != 1 else '' }}</small></div><button type="button" class="icon-danger" onclick="deleteTVEpisode({{ season.season_number }}, {{ episode.episode_number }})" title="Delete episode"><i class="fa-solid fa-trash"></i></button></div>
+                {% if episode.telegram %}
+                <div class="episode-streams">
+                  {% for quality in episode.telegram|sort(attribute='quality') %}
+                  <div class="episode-stream-row"><div><div class="stream-meta"><span class="quality-mark">{{ quality.quality or 'AUTO' }}</span><span class="file-size">{{ quality.size or 'Size unavailable' }}</span>{% if quality.parts %}<span class="split-part-count"><i class="fa-solid fa-layer-group"></i> {{ quality.parts|length }} parts</span>{% endif %}</div><p class="stream-filename" title="{{ quality.media_filename or quality.name }}">{{ quality.media_filename or quality.name }}</p></div><div class="stream-row-actions"><button type="button" class="btn-ui btn-success" onclick='copyStreamLink({{ quality.id|tojson }}, {{ (quality.media_filename or quality.name)|tojson }})' title="Copy link"><i class="fa-regular fa-copy"></i></button><button type="button" class="btn-ui" onclick='runSpeedTest({{ quality.id|tojson }}, "tv", {{ quality.quality|default("Stream")|tojson }})' title="Speed test"><i class="fa-solid fa-gauge-high"></i></button><button type="button" class="btn-ui btn-danger" onclick='deleteTVQuality({{ season.season_number }}, {{ episode.episode_number }}, {{ quality.id|tojson }})' title="Delete stream"><i class="fa-solid fa-trash"></i></button></div></div>
+                  {% endfor %}
+                </div>
+                {% else %}<p class="episode-empty">No indexed stream for this episode.</p>{% endif %}
+              </article>
+              {% endfor %}
+            </div>
+            <div class="season-footer"><button type="button" class="btn-ui btn-danger" onclick="deleteTVSeason({{ season.season_number }})"><i class="fa-solid fa-trash"></i> Delete season {{ season.season_number }}</button></div>
+          </div>
+        </article>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="content-empty"><i class="fa-solid fa-box-open"></i><strong>No indexed file yet</strong><span>Run Channel Scanner to add media files to this record.</span></div>
+      {% endif %}
+    </section>
+    {% endif %}
+  </div>
+</div>
+
+<div id="speed-test-modal" class="speed-modal hidden" aria-modal="true" aria-labelledby="speed-modal-title" role="dialog">
+  <button class="speed-modal-backdrop" type="button" onclick="closeSpeedTest()" aria-label="Close speed test"></button>
+  <section class="speed-modal-card">
+    <header><div><span class="modal-kicker">Network diagnostic</span><h2 id="speed-modal-title"><i class="fa-solid fa-gauge-high"></i> DC speed test</h2><p id="st-label"></p></div><button type="button" class="modal-close" onclick="closeSpeedTest()" aria-label="Close"><i class="fa-solid fa-xmark"></i></button></header>
+    <div class="speed-modal-body">
+      <div id="st-spinner" class="speed-loading"><span class="loader-ring"></span><strong>Testing connected clients</strong><p>Downloading a sample from each available Telegram DC.</p></div>
+      <div id="st-results" class="hidden"><div class="speed-table-wrap"><table class="speed-table"><thead><tr><th>Client</th><th>Ping</th><th>Speed</th><th>Time</th><th>Downloaded</th><th>Status</th></tr></thead><tbody id="st-tbody"></tbody></table></div><p id="st-summary" class="speed-summary"></p></div>
+      <p id="st-error" class="speed-error hidden"></p>
+    </div>
+    <footer><button id="st-rerun-btn" type="button" class="btn-ui btn-primary hidden" onclick="rerunSpeedTest()"><i class="fa-solid fa-rotate"></i> Run again</button><button type="button" class="btn-ui btn-ghost" onclick="closeSpeedTest()">Close</button></footer>
+  </section>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>window.TG_STREMIO_PAGE = { tmdbId: {{ tmdb_id }}, dbIndex: {{ db_index }}, mediaType: {{ media_type | tojson }}, apiToken: {{ (api_token | tojson) if api_token else 'null' }} };</script>
+<script src="/static/js/pages/media-edit.js?v=3.6.121" defer></script>
+{% endblock %}

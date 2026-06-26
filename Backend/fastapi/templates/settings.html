@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block title %}Settings · TG Stremio{% endblock %}
+{% block extra_head %}
+<link rel="stylesheet" href="/static/css/pages/settings.css?v=3.6.120">
+{% endblock %}
+
+{% block content %}
+<div class="settings-workspace" id="settings-root">
+  <header class="page-topline settings-topline">
+    <div>
+      <div class="page-overline"><i class="fa-solid fa-sliders"></i> Runtime configuration</div>
+      <h1 class="page-title">Workspace settings</h1>
+      <p class="page-subtitle">Configuration is stored in your database and changes take effect without a Space rebuild unless a setting says otherwise.</p>
+    </div>
+    <button id="save-btn" data-save-settings type="button" class="btn-ui btn-primary save-settings-btn" onclick="saveSettings()"><i class="fa-solid fa-floppy-disk"></i><span id="save-label">Save changes</span></button>
+  </header>
+
+  <div class="settings-layout">
+    <aside class="settings-index" aria-label="Settings sections">
+      <span class="index-label">Settings</span>
+      <a href="#behavior"><i class="fa-solid fa-sliders"></i> Behavior</a>
+      <a href="#access"><i class="fa-solid fa-shield-halved"></i> Access</a>
+      <a href="#source"><i class="fa-solid fa-film"></i> Metadata</a>
+      <a href="#subscription-section"><i class="fa-solid fa-ticket"></i> Subscription</a>
+      <a href="#search"><i class="fa-solid fa-globe"></i> Global search</a>
+      <a href="#delivery"><i class="fa-solid fa-network-wired"></i> Delivery</a>
+      <a href="#storage"><i class="fa-solid fa-database"></i> Storage</a>
+      <a href="#clients"><i class="fa-brands fa-telegram"></i> Clients</a>
+    </aside>
+
+    <div class="settings-sections">
+      <section id="behavior" class="config-section">
+        <div class="config-section-head"><span class="config-step">01</span><div><h2>Library behavior</h2><p>Choose how your Telegram library replaces media and appears in Stremio.</p></div></div>
+        <div class="setting-options two-up">
+          <label class="switch-option"><input type="checkbox" id="replace_mode" {% if settings.replace_mode %}checked{% endif %}><span class="switch-track"></span><span class="switch-copy"><strong>Replace mode</strong><small>New media replaces the matching quality and removes the older Telegram source post after the new file is indexed. A subtitle replaces only its matching movie/episode and language.</small></span></label>
+          <label class="switch-option"><input type="checkbox" id="hide_catalog" {% if settings.hide_catalog %}checked{% endif %}><span class="switch-track"></span><span class="switch-copy"><strong>Hide public catalog</strong><small>Keep catalog browsing private while direct access tokens continue to work.</small></span></label>
+        </div>
+      </section>
+
+      <section id="access" class="config-section">
+        <div class="config-section-head"><span class="config-step">02</span><div><h2>Administrator and access channels</h2><p>Protect the WebUI and require users to belong to your allowed Telegram channels.</p></div></div>
+        <div class="field-grid two-up">
+          <label><span>Administrator username</span><input type="text" id="admin_username" value="{{ settings.admin_username }}" autocomplete="off"></label>
+          <label><span>Administrator password</span><div class="password-control"><input type="password" id="admin_password" placeholder="Leave blank to keep the current password" autocomplete="new-password"><button type="button" onclick="togglePwdVisibility()" aria-label="Show or hide password"><i id="eye-icon" class="fa-solid fa-eye"></i></button></div>{% if settings.admin_password_set is defined and settings.admin_password_set %}<small class="field-ok"><i class="fa-solid fa-circle-check"></i> Password is configured</small>{% endif %}</label>
+        </div>
+        <div class="section-rule"></div>
+        <div class="subsection-head"><div><h3>Required channels</h3><p>A visitor must be a member of at least one item in this list.</p></div></div>
+        <div class="input-stack" id="auth_channels_items">
+          {% for ch in settings.auth_channels %}
+          <div class="multi-item"><input type="text" value="{{ ch }}" data-list="auth_channels" aria-label="Allowed channel"><button type="button" class="remove-btn" onclick="removeItem(this)" title="Remove channel"><i class="fa-solid fa-xmark"></i></button></div>
+          {% endfor %}
+        </div>
+        <div class="add-row"><input type="text" id="auth_channels_new" placeholder="@channelname or -100xxxxxxxxxx" onkeydown="if(event.key==='Enter'){event.preventDefault();addItem('auth_channels')}"><button type="button" class="add-btn" onclick="addItem('auth_channels')"><i class="fa-solid fa-plus"></i> Add channel</button></div>
+      </section>
+
+      <section id="source" class="config-section">
+        <div class="config-section-head"><span class="config-step">03</span><div><h2>Metadata and source</h2><p>Set the services and public URL used for title matching, Stremio links, and upstream updates.</p></div></div>
+        <div class="field-grid two-up">
+          <label><span>TMDb API key</span><input type="text" id="tmdb_api" value="{{ settings.tmdb_api }}" autocomplete="off" spellcheck="false" placeholder="Your TMDb v3 API key"></label>
+          <label><span>Public base URL</span><input type="url" id="base_url" value="{{ settings.base_url }}" placeholder="https://your-space.hf.space"></label>
+          <label><span>Upstream repository</span><input type="text" id="upstream_repo" value="{{ settings.upstream_repo }}" placeholder="owner/repository"></label>
+          <label><span>Upstream branch</span><input type="text" id="upstream_branch" value="{{ settings.upstream_branch }}" placeholder="main"></label>
+        </div>
+      </section>
+
+      <section id="subscription-section" class="config-section">
+        <div class="config-section-head"><span class="config-step">04</span><div><h2>Subscription access</h2><p>Restrict Stremio access to members with an active plan.</p></div></div>
+        <label class="switch-option subscription-switch"><input type="checkbox" id="subscription" {% if settings.subscription %}checked{% endif %} onchange="toggleSubFields()"><span class="switch-track"></span><span class="switch-copy"><strong>Enable subscription system</strong><small>Users are checked against your subscription group before their token can use the add-on.</small></span></label>
+        <div id="sub-fields" class="conditional-fields{% if not settings.subscription %} is-hidden{% endif %}">
+          <div class="field-grid two-up">
+            <label><span>Subscription group ID</span><input type="number" id="subscription_group_id" value="{{ settings.subscription_group_id }}" placeholder="-100xxxxxxxxxx"></label>
+            <label><span>Subscription URL</span><input type="url" id="subscription_url" value="{{ settings.subscription_url }}" placeholder="https://t.me/your_group"></label>
+          </div>
+          <label class="field-block"><span>Payment instructions</span><textarea id="payment_instructions" rows="4" placeholder="Explain how users should pay and submit proof.">{{ settings.payment_instructions }}</textarea><small>Shown to users after they choose a subscription plan.</small></label>
+          <label class="field-block"><span>Payment QR image URL <em>optional</em></span><input type="url" id="payment_qr_url" value="{{ settings.payment_qr_url }}" placeholder="https://…/payment-qr.png"></label>
+          <div class="subsection-head"><div><h3>Approvers</h3><p>Telegram user IDs that can approve subscription payments.</p></div></div>
+          <div class="input-stack" id="approver_ids_items">
+            {% for uid in settings.approver_ids %}
+            <div class="multi-item"><input type="number" value="{{ uid }}" data-list="approver_ids" aria-label="Approver Telegram user ID"><button type="button" class="remove-btn" onclick="removeItem(this)" title="Remove approver"><i class="fa-solid fa-xmark"></i></button></div>
+            {% endfor %}
+          </div>
+          <div class="add-row"><input type="number" id="approver_ids_new" placeholder="Telegram user ID" onkeydown="if(event.key==='Enter'){event.preventDefault();addItem('approver_ids')}"><button type="button" class="add-btn" onclick="addItem('approver_ids')"><i class="fa-solid fa-plus"></i> Add approver</button></div>
+        </div>
+      </section>
+
+      <section id="search" class="config-section">
+        <div class="config-section-head"><span class="config-step">05</span><div><h2>Global search</h2><p>Allow the Userbot to find titles in additional Telegram channels without putting them in your local catalog.</p></div></div>
+        <label class="switch-option{% if not userbot_configured %} is-disabled{% endif %}"><input type="checkbox" id="global_search" {% if settings.global_search %}checked{% endif %} {% if not userbot_configured %}disabled{% endif %} onchange="toggleGlobalSearchFields()"><span class="switch-track"></span><span class="switch-copy"><strong>Enable global search</strong><small>Streams outside your library are marked Global in the Stremio results.</small></span></label>
+        {% if not userbot_configured %}<div class="callout-info"><i class="fa-solid fa-circle-info"></i><p><code>USER_SESSION_STRING</code> is required in <code>config.env</code>. Save it there and restart the app to unlock this setting.</p></div>{% endif %}
+        <div id="global-search-fields" class="conditional-fields{% if not settings.global_search %} is-hidden{% endif %}">
+          <div id="global-search-channels-wrap" class="{% if not userbot_configured %}is-disabled{% endif %}">
+            <div class="callout-warning"><i class="fa-solid fa-triangle-exclamation"></i><p>Global Search runs only when at least one numeric channel ID is added below.</p></div>
+            <div class="subsection-head"><div><h3>Search channels</h3><p>Use <code>-1001234567890</code> or a bare numeric Telegram channel ID.</p></div></div>
+            <div class="input-stack" id="global_search_channels_items">
+              {% for ch in settings.global_search_channels %}
+              <div class="multi-item"><input type="text" value="{{ ch }}" data-list="global_search_channels" placeholder="-100xxxxxxxxxx" aria-label="Global search channel"><button type="button" class="remove-btn" onclick="removeItem(this)" title="Remove channel"><i class="fa-solid fa-xmark"></i></button></div>
+              {% endfor %}
+            </div>
+            <div class="add-row"><input type="text" id="global_search_channels_new" placeholder="-100xxxxxxxxxx" onkeydown="if(event.key==='Enter'){event.preventDefault();addItem('global_search_channels')}"><button type="button" class="add-btn" onclick="addItem('global_search_channels')"><i class="fa-solid fa-plus"></i> Add search channel</button></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="delivery" class="config-section">
+        <div class="config-section-head"><span class="config-step">06</span><div><h2>Stream delivery</h2><p>Configure an optional HTTP proxy and decide whether direct links remain visible.</p></div></div>
+        <label class="field-block"><span>HTTP proxy URL</span><input type="url" id="http_proxy_url" value="{{ settings.http_proxy_url }}" placeholder="http://username:password@host:port"><small>Leave empty to use direct Telegram delivery only.</small></label>
+        <label class="switch-option"><input type="checkbox" id="show_proxy_and_non_proxy_both" {% if settings.show_proxy_and_non_proxy_both %}checked{% endif %}><span class="switch-track"></span><span class="switch-copy"><strong>Show both stream types</strong><small>Expose proxied and direct stream URLs together in Stremio.</small></span></label>
+      </section>
+
+      <section id="storage" class="config-section">
+        <div class="config-section-head"><span class="config-step">07</span><div><h2>Storage databases</h2><p>Required database connections are locked. You can append extra media-storage databases or remove entries from the end of the list.</p></div></div>
+        <div class="locked-db-list">
+          {% for entry in settings.database_list %}{% if entry.locked %}<div class="locked-db-row"><span class="lock-badge"><i class="fa-solid fa-lock"></i> {{ "Tracking" if entry.type == "tracking" else "Storage 1" }}</span><code>{{ entry.uri_masked }}</code></div>{% endif %}{% endfor %}
+        </div>
+        <div class="subsection-head"><div><h3>Extra storage databases</h3><p>Extra MongoDB URIs join or leave immediately after saving.</p></div></div>
+        <div class="input-stack" id="extra_databases_items">
+          {% for entry in settings.database_list %}{% if not entry.locked %}<div class="multi-item"><input type="text" value="{{ entry.full_uri }}" spellcheck="false" data-list="extra_databases" placeholder="mongodb+srv://user:pass@host/…"><span class="db-dot {{ 'is-connected' if entry.connected else 'is-disconnected' }}" title="{{ 'Connected' if entry.connected else 'Disconnected' }}"></span><button type="button" class="remove-btn" onclick="removeItem(this)" title="Remove last database"><i class="fa-solid fa-xmark"></i></button></div>{% endif %}{% endfor %}
+        </div>
+        <div class="add-row"><input type="text" id="extra_databases_new" spellcheck="false" placeholder="mongodb+srv://user:pass@host/…" onkeydown="if(event.key==='Enter'){event.preventDefault();addItem('extra_databases')}"><button type="button" class="add-btn" onclick="addItem('extra_databases')"><i class="fa-solid fa-plus"></i> Add database</button></div>
+      </section>
+
+      <section id="clients" class="config-section">
+        <div class="config-section-head"><span class="config-step">08</span><div><h2>Parallel Telegram clients</h2><p>Add extra bot tokens to increase available clients for streaming. Changes reinitialize the client pool immediately.</p></div></div>
+        <div class="input-stack" id="multi_tokens_items">
+          {% for tok in settings.multi_tokens %}<div class="multi-item"><input type="text" value="{{ tok }}" spellcheck="false" data-list="multi_tokens" placeholder="Bot token"><button type="button" class="remove-btn" onclick="removeItem(this)" title="Remove token"><i class="fa-solid fa-xmark"></i></button></div>{% endfor %}
+        </div>
+        <div class="add-row"><input type="text" id="multi_tokens_new" spellcheck="false" placeholder="123456789:ABCdef…" onkeydown="if(event.key==='Enter'){event.preventDefault();addItem('multi_tokens')}"><button type="button" class="add-btn" onclick="addItem('multi_tokens')"><i class="fa-solid fa-plus"></i> Add token</button></div>
+      </section>
+
+      <div class="save-section"><div><strong>Ready to apply changes?</strong><p id="settings-persistence-status">Runtime settings are saved to MongoDB and verified after every save. Startup-only options stay in <code>config.env</code>.</p></div><button type="button" data-save-settings class="btn-ui btn-primary" onclick="saveSettings()"><i class="fa-solid fa-floppy-disk"></i> Save changes</button></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/static/js/pages/settings.js?v=3.6.120" defer></script>
+{% endblock %}

@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+
+{% block title %}Overview · TG Stremio{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="/static/css/pages/dashboard.css?v=3.6.120">{% endblock %}
+
+{% block content %}
+<div class="studio-page dashboard-page">
+  <header class="page-topline">
+    <div>
+      <div class="page-overline"><i class="fa-solid fa-chart-pie"></i> Live system overview</div>
+      <h1 class="page-title">Library at a glance</h1>
+      <p class="page-subtitle">Monitor your Telegram library, active streams, storage nodes and viewer access from one compact workspace.</p>
+    </div>
+    <button onclick="refreshDashboard()" class="btn-ui btn-primary dashboard-refresh"><i id="refresh-icon" class="fa-solid fa-arrows-rotate"></i><span>Refresh live data</span></button>
+  </header>
+
+  <section class="metric-grid dashboard-metrics" aria-label="System statistics">
+    <article class="metric-card"><span class="metric-icon"><i class="fa-regular fa-clock"></i></span><p class="metric-label">Uptime</p><p id="sys-uptime" class="metric-value">{{ system_stats.uptime or 'N/A' }}</p><span class="metric-note">Service availability</span></article>
+    <article class="metric-card"><span class="metric-icon"><i class="fa-solid fa-satellite-dish"></i></span><p class="metric-label">Bot nodes</p><p id="sys-bots-count" class="metric-value">{{ system_stats.connected_bots|default(0) }}</p><span class="metric-note">Connected clients</span></article>
+    <article class="metric-card"><span class="metric-icon"><i class="fa-solid fa-signal"></i></span><p class="metric-label">Live streams</p><p id="sys-live-streams" class="metric-value">{{ system_stats.total_active_streams|default(0) }}</p><span class="metric-note">Playing right now</span></article>
+    <article class="metric-card"><span class="metric-icon"><i class="fa-solid fa-code-branch"></i></span><p class="metric-label">Build</p><p id="sys-version" class="metric-value">v{{ system_stats.version or '1.0.0' }}</p><span class="metric-note">Current release</span></article>
+  </section>
+
+  <div class="dashboard-layout">
+    <section class="surface surface-pad storage-panel">
+      <div class="section-heading"><div><h2>Storage map</h2><p>Indexed media held across your active database nodes.</p></div><a class="mini-tab" href="/media/manage"><i class="fa-solid fa-arrow-up-right-from-square"></i> Library</a></div>
+      <div class="node-grid">
+        {% for db_stat in system_stats.databases %}
+        <article class="node-card">
+          <div class="node-card-top"><div><span class="node-code">{{ db_stat.db_name.replace('storage_', 'NODE ') }}</span><h3>{{ db_stat.db_name.replace('storage_', 'Storage ') }}</h3></div><span class="status-pill status-live"><span class="status-signal"></span> Online</span></div>
+          <div class="node-counts"><div><span>Movies</span><strong>{{ db_stat.movie_count }}</strong></div><div><span>Series</span><strong>{{ db_stat.tv_count }}</strong></div><div><span>Used</span><strong>{{ "%.1f"|format(db_stat.storageSize / 1024 / 1024) }} MB</strong></div></div>
+          {% set storage_percent = (db_stat.storageSize / (500 * 1024 * 1024) * 100) | round %}
+          <div class="node-meter"><div class="node-meter-label"><span>Node capacity</span><strong>{{ storage_percent }}%</strong></div><div class="progress-track"><span class="progress-fill" style="width: {{ storage_percent }}%"></span></div></div>
+        </article>
+        {% else %}
+        <div class="empty-state node-empty"><i class="fa-solid fa-database"></i><span>No active storage nodes found.</span></div>
+        {% endfor %}
+      </div>
+      <div class="library-shortcuts">
+        <a href="/media/manage?media_type=movie" class="shortcut-card"><span><i class="fa-solid fa-film"></i></span><div><strong>Movies</strong><small>Review indexed video qualities</small></div><i class="fa-solid fa-arrow-right"></i></a>
+        <a href="/media/manage?media_type=tv" class="shortcut-card"><span><i class="fa-solid fa-tv"></i></span><div><strong>Series</strong><small>Manage seasons and episodes</small></div><i class="fa-solid fa-arrow-right"></i></a>
+      </div>
+    </section>
+
+    <aside class="surface surface-pad stream-panel">
+      <div class="section-heading"><div><h2>Stream monitor</h2><p>Live client activity</p></div><span id="live-stream-count" class="status-pill status-live">{{ system_stats.total_active_streams or 0 }} live</span></div>
+      <div class="stream-totals"><div><span>Now</span><strong id="live-now-count">{{ system_stats.total_active_streams or 0 }}</strong></div><div><span>Recent</span><strong id="recent-stream-count">0</strong></div></div>
+      <div id="active-streams-container" class="stream-list">
+        {% if system_stats.active_streams %}
+          {% for stream in system_stats.active_streams %}
+          <article class="stream-row">
+            <div class="stream-row-top"><span class="stream-state"><i class="fa-solid fa-play"></i></span><div><strong>{{ stream.title or stream.meta.get('title') or 'Unknown Stream' }}</strong><small>BOT {{ (stream.client_index or 0) + 1 }} · DC {{ stream.dc_id or '-' }}</small></div><span class="stream-live">LIVE</span></div>
+            <div class="stream-values"><span><small>Speed</small><b>{{ "%.3f"|format(stream.avg_mbps or 0) }} MB/s</b></span><span><small>Played</small><b>{{ "%.1f"|format((stream.total_bytes or 0) / 1024 / 1024) }} MB</b></span><span><small>Time</small><b class="live-duration" data-start-ts="{{ stream.start_ts or 0 }}">0s</b></span></div>
+            <div class="stream-id"><span class="live-started" data-start-ts="{{ stream.start_ts or 0 }}">—</span><code>{{ stream.stream_id or 'Unknown' }}</code></div>
+          </article>
+          {% endfor %}
+        {% else %}
+          <div class="stream-empty"><span><i class="fa-solid fa-signal"></i></span><strong>No active streams</strong><small>Play a title in Stremio to see it here.</small></div>
+        {% endif %}
+      </div>
+    </aside>
+  </div>
+
+  <section class="surface access-panel">
+    <div class="access-panel-head">
+      <div><div class="page-overline"><i class="fa-solid fa-key"></i> Private access</div><h2>Viewer tokens</h2><p>Create personal manifest links and control each viewer’s data limits.</p></div>
+      <button onclick="toggleCreateForm()" id="create-btn-container" class="btn-ui btn-primary"><i class="fa-solid fa-plus"></i> New token</button>
+    </div>
+    <div id="create-form-container" class="token-create hidden">
+      <form onsubmit="createToken(event)">
+        <label><span>Friendly name</span><input type="text" id="token-name" placeholder="Example: Living Room TV" required></label>
+        <label><span>Daily GB limit</span><input type="number" id="daily-limit" value="0" step="0.1" min="0"></label>
+        <label><span>Monthly GB limit</span><input type="number" id="monthly-limit" value="0" step="0.1" min="0"></label>
+        <div class="token-create-actions"><button type="button" onclick="toggleCreateForm()" class="btn-ui btn-ghost">Cancel</button><button type="submit" class="btn-ui btn-primary"><i class="fa-solid fa-key"></i> Create</button></div>
+      </form>
+    </div>
+
+    <div class="token-table-wrap">
+      <table class="token-table">
+        <thead><tr><th>Viewer</th><th>Usage</th><th>Limits</th><th>Manifest</th><th></th></tr></thead>
+        <tbody>
+        {% for token in api_tokens %}
+        <tr id="token-row-{{ loop.index0 }}">
+          <td><div class="token-name"><span>{{ token.name[:1]|upper }}</span><div><strong>{{ token.name }}</strong><small>{{ token.created_at.strftime('%d %b %Y') if token.created_at else 'Unknown date' }}</small></div></div></td>
+          <td><div class="token-usage"><span>Today <b data-bytes="{{ token.usage.daily.bytes|default(0) }}"></b></span><span>Month <b data-bytes="{{ token.usage.monthly.bytes|default(0) }}"></b></span></div></td>
+          <td><div class="token-limits"><span>Daily <b>{{ token.limits.daily_limit_gb or '∞' }} GB</b></span><span>Month <b>{{ token.limits.monthly_limit_gb or '∞' }} GB</b></span></div></td>
+          <td><button onclick='copyUrl({{ ((request.base_url|string).replace("http:", "https:") ~ "stremio/" ~ token.token ~ "/manifest.json")|tojson }})' class="manifest-action"><i class="fa-solid fa-copy"></i> Copy link</button></td>
+          <td><div class="row-actions"><button onclick='openEditModal({{ token.token|tojson }}, {{ token.limits.daily_limit_gb|default(0)|tojson }}, {{ token.limits.monthly_limit_gb|default(0)|tojson }})' class="icon-action" title="Edit limits"><i class="fa-solid fa-pen"></i></button><button onclick='revokeToken({{ token.token|tojson }})' class="icon-action token-delete" title="Revoke token"><i class="fa-solid fa-trash"></i></button></div></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5"><div class="table-empty"><i class="fa-solid fa-key"></i><span>No viewer tokens yet.</span></div></td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="token-mobile-list">
+      {% for token in api_tokens %}
+      <article id="token-card-{{ loop.index0 }}" class="token-mobile-card"><div class="token-mobile-head"><div class="token-name"><span>{{ token.name[:1]|upper }}</span><div><strong>{{ token.name }}</strong><small>{{ token.created_at.strftime('%d %b %Y') if token.created_at else 'Unknown date' }}</small></div></div><div class="row-actions"><button onclick='openEditModal({{ token.token|tojson }}, {{ token.limits.daily_limit_gb|default(0)|tojson }}, {{ token.limits.monthly_limit_gb|default(0)|tojson }})' class="icon-action"><i class="fa-solid fa-pen"></i></button><button onclick='revokeToken({{ token.token|tojson }})' class="icon-action token-delete"><i class="fa-solid fa-trash"></i></button></div></div><div class="token-mobile-stats"><span>Today <b data-bytes="{{ token.usage.daily.bytes|default(0) }}"></b></span><span>Month <b data-bytes="{{ token.usage.monthly.bytes|default(0) }}"></b></span></div><button onclick='copyUrl({{ ((request.base_url|string).replace("http:", "https:") ~ "stremio/" ~ token.token ~ "/manifest.json")|tojson }})' class="manifest-action"><i class="fa-solid fa-copy"></i> Copy manifest link</button></article>
+      {% else %}<div class="table-empty"><i class="fa-solid fa-key"></i><span>No viewer tokens yet.</span></div>{% endfor %}
+    </div>
+  </section>
+</div>
+
+<div id="edit-modal" class="fixed inset-0 hidden z-50 items-end justify-center p-3 sm:p-5 modal-backdrop">
+  <section class="modal-glass token-limit-modal">
+    <div class="modal-title-row"><div><span class="page-kicker">Token controls</span><h3>Edit data limits</h3><p>Set zero for unlimited viewer access.</p></div><button onclick="closeEditModal()" class="icon-action"><i class="fa-solid fa-xmark"></i></button></div>
+    <input type="hidden" id="edit-token-id">
+    <div class="modal-fields"><label>Daily limit (GB)<input type="number" id="edit-daily" step="0.1" min="0"></label><label>Monthly limit (GB)<input type="number" id="edit-monthly" step="0.1" min="0"></label></div>
+    <div class="modal-actions"><button onclick="closeEditModal()" class="btn-ui btn-ghost">Cancel</button><button onclick="saveTokenLimits()" class="btn-ui btn-primary">Save changes</button></div>
+  </section>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}<script src="/static/js/pages/dashboard.js?v=3.6.120" defer></script>{% endblock %}

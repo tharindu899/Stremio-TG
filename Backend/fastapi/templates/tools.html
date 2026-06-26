@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Scanner Tools · TG Stremio{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="/static/css/pages/tools.css?v=3.6.128">{% endblock %}
+
+{% block content %}
+<div class="studio-page tools-page">
+  <header class="page-topline">
+    <div>
+      <div class="page-overline"><i class="fa-solid fa-magnifying-glass"></i> Library maintenance</div>
+      <h1 class="page-title">Scanner tools</h1>
+      <p class="page-subtitle">Index channels, process subtitles, validate Telegram files and remove dead records from a single control surface.</p>
+    </div>
+  </header>
+
+  <div class="tools-layout">
+    <section class="surface tool-workspace scan-workspace">
+      <div class="tool-workspace-head"><div><span class="tool-symbol"><i class="fa-solid fa-satellite-dish"></i></span><div><h2>Channel scanner</h2><p>Choose channels, choose what to index, then run one focused scan.</p></div></div><span id="scan-status-pill" class="status-pill status-idle">Idle</span></div>
+
+      <div class="scanner-section channel-picker-section"><div class="scanner-label-row"><label>Source channels</label><div><button class="text-button" type="button" onclick="selectAllChannels(true)">Select all</button><button class="text-button" type="button" onclick="selectAllChannels(false)">Clear</button></div></div><div class="channel-list" id="channel-list"><div class="channel-loading" id="channels-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading available channels…</div></div></div>
+
+      <div class="scanner-section"><div class="scanner-label-row"><label>Scan mode</label><span>Each mode keeps its own cursor</span></div><div class="scan-scope-grid" id="scan-scope-picker">
+        <label class="scan-scope-choice"><input type="radio" name="scan_scope" value="media"><span class="scope-card"><span class="scope-icon"><i class="fa-solid fa-film"></i></span><span class="scope-copy"><strong>Media</strong><small>Movies, series and split videos</small></span><span class="scope-check" aria-hidden="true"><i class="fa-solid fa-check"></i></span></span></label>
+        <label class="scan-scope-choice"><input type="radio" name="scan_scope" value="subtitles"><span class="scope-card"><span class="scope-icon"><i class="fa-solid fa-closed-captioning"></i></span><span class="scope-copy"><strong>Subtitles</strong><small>Subtitle files only</small></span><span class="scope-check" aria-hidden="true"><i class="fa-solid fa-check"></i></span></span></label>
+        <label class="scan-scope-choice"><input type="radio" name="scan_scope" value="all" checked><span class="scope-card"><span class="scope-icon"><i class="fa-solid fa-layer-group"></i></span><span class="scope-copy"><strong>Everything</strong><small>Media + subtitles together</small></span><span class="scope-check" aria-hidden="true"><i class="fa-solid fa-check"></i></span></span></label>
+      </div><p class="scanner-hint"><i class="fa-solid fa-circle-info"></i> Start Scan checks only new posts after the saved cursor. Use Rescan to rebuild older channel posts. A subtitle rescan clears only subtitle index rows; Telegram files remain safe.</p></div>
+
+      <div class="scanner-progress" id="scan-progress-card" aria-live="polite">
+        <div class="scanner-progress-head">
+          <strong id="scan-title">Scanner ready</strong>
+          <span class="scan-progress-time"><i class="fa-regular fa-clock"></i> <b id="scan-elapsed">0s</b></span>
+        </div>
+        <p class="scan-progress-copy" id="scan-current">Choose a channel and start a scan.</p>
+        <div class="progress-track scan-progress-track" role="progressbar" aria-label="Channel scan progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <div class="progress-fill" id="scan-bar"></div>
+        </div>
+      </div>
+
+      <div class="scan-stat-grid"><div class="scan-stat"><strong id="sc-processed">0</strong><span>Processed</span></div><div class="scan-stat positive"><strong id="sc-indexed">0</strong><span>Media indexed</span></div><div class="scan-stat"><strong id="sc-subs-found">0</strong><span>Subs found</span></div><div class="scan-stat positive"><strong id="sc-subs-indexed">0</strong><span>Subs indexed</span></div><div class="scan-stat positive"><strong id="sc-subs-matched">0</strong><span>Matched</span></div><div class="scan-stat warning"><strong id="sc-subs-unmatched">0</strong><span>Unmatched</span></div><div class="scan-stat"><strong id="sc-subs-replaced">0</strong><span>Replaced</span></div><div class="scan-stat danger"><strong id="sc-errors">0</strong><span>Errors</span></div><div class="scan-stat scan-stat-wide"><strong id="sc-non-video-skipped">0</strong><span>Non-video skipped</span></div></div>
+      <div class="tool-actions"><button class="btn-ui btn-primary" id="scan-start-btn" onclick="startScan('scan')"><i class="fa-solid fa-play"></i><span id="scan-start-label">Start scan</span></button><button class="btn-ui btn-warning" id="rescan-btn" onclick="confirmRescan()"><i class="fa-solid fa-arrows-rotate"></i> Rescan</button><button class="btn-ui btn-danger" id="scan-cancel-btn" onclick="cancelScan()" disabled><i class="fa-solid fa-stop"></i> Stop</button><a href="/subtitles" class="btn-ui btn-ghost"><i class="fa-solid fa-arrow-up-right-from-square"></i> Subtitle manager</a></div><p class="tool-error" id="scan-error"></p>
+    </section>
+
+    <section class="surface tool-workspace health-workspace">
+      <div class="tool-workspace-head"><div><span class="tool-symbol health"><i class="fa-solid fa-heart-pulse"></i></span><div><h2>Health check</h2><p>Confirm indexed file links still exist and clean broken library records.</p></div></div><span id="dbc-status-pill" class="status-pill status-idle">Idle</span></div>
+      <div class="scanner-progress"><div class="scanner-progress-head"><strong id="dbc-current">No check running</strong><span><i class="fa-solid fa-gauge-high"></i> <b id="dbc-speed">0</b>/s · <i class="fa-regular fa-clock"></i> <b id="dbc-elapsed">0s</b></span></div><div class="progress-track"><div class="progress-fill" id="dbc-bar"></div></div></div>
+      <div class="health-stat-grid"><div class="scan-stat"><strong id="dbc-checked">0</strong><span>Checked</span></div><div class="scan-stat positive"><strong id="dbc-alive">0</strong><span>Alive</span></div><div class="scan-stat danger"><strong id="dbc-dead">0</strong><span>Dead</span></div><div class="scan-stat"><strong id="dbc-errors">0</strong><span>Errors</span></div><div class="scan-stat"><strong id="dbc-purged">0</strong><span>Purged</span></div></div>
+      <div class="tool-actions"><button class="btn-ui btn-primary" id="dbc-start-btn" onclick="startDbCheck()"><i class="fa-solid fa-play"></i> Run check</button><button class="btn-ui btn-danger" id="dbc-cancel-btn" onclick="cancelDbCheck()" disabled><i class="fa-solid fa-stop"></i> Stop</button></div>
+      <div class="dead-link-section"><div class="dead-link-head"><div><label>Dead link queue</label><p>Load links flagged automatically or by the check above.</p></div><div><button class="btn-ui btn-ghost" type="button" onclick="loadFlaggedDeadLinks()"><i class="fa-solid fa-rotate"></i> Load flagged</button><button class="btn-ui btn-danger" id="purge-btn" onclick="purgeDeadLinks()" disabled><i class="fa-solid fa-trash"></i><span id="purge-label">Purge</span></button></div></div><div class="dead-list" id="dead-list"><div class="dead-empty"><i class="fa-solid fa-link-slash"></i><span>No dead links loaded.</span></div></div></div>
+    </section>
+  </div>
+</div>
+{% endblock %}
+{% block extra_scripts %}<script src="/static/js/pages/tools.js?v=3.6.128" defer></script>{% endblock %}

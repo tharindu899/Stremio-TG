@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Media Library · TG Stremio{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="/static/css/pages/media-library.css?v=3.6.120">{% endblock %}
+
+{% block content %}
+<div class="studio-page library-page">
+  <header class="page-topline library-topline">
+    <div>
+      <div class="page-overline"><i class="fa-solid fa-clapperboard"></i> Indexed Telegram library</div>
+      <h1 class="page-title">Media library</h1>
+      <p class="page-subtitle">Search, edit, remove and inspect every movie or series indexed in your active storage.</p>
+    </div>
+    <div class="library-toggle" aria-label="Media type">
+      <a href="/media/manage?media_type=movie" class="{% if media_type == 'movie' %}active{% endif %}"><i class="fa-solid fa-film"></i><span>Movies</span></a>
+      <a href="/media/manage?media_type=tv" class="{% if media_type == 'tv' %}active{% endif %}"><i class="fa-solid fa-tv"></i><span>Series</span></a>
+    </div>
+  </header>
+
+  <section class="library-command surface">
+    <div class="library-command-copy"><span class="page-kicker">Browse {{ media_type|title }} collection</span><strong>Find a title fast</strong><small>Search by indexed title. Open any card to edit streams, subtitles and metadata.</small></div>
+    <div class="library-search"><div class="library-search-field"><i class="fa-solid fa-magnifying-glass"></i><input type="search" id="search-input" placeholder="Search {{ media_type }} titles..."></div><button onclick="searchMedia()" class="btn-ui btn-primary"><i class="fa-solid fa-arrow-right"></i><span>Search</span></button><button onclick="clearSearch()" class="btn-ui btn-ghost library-clear" title="Clear search"><i class="fa-solid fa-xmark"></i><span>Clear</span></button></div>
+  </section>
+
+  <div id="loading" class="library-loading hidden"><span class="loading-orbit"><i class="fa-solid fa-clapperboard"></i></span><strong>Loading your library</strong><small>Checking storage nodes…</small></div>
+
+  <section id="error-display" class="library-error hidden"><span><i class="fa-solid fa-triangle-exclamation"></i></span><div><strong>Media list could not load</strong><p id="error-message"></p></div><button onclick="retryLoad()" class="btn-ui btn-primary"><i class="fa-solid fa-rotate-right"></i> Retry</button></section>
+
+  <div id="media-grid" class="library-grid"></div>
+
+  <section id="no-results" class="library-empty hidden"><span><i class="fa-solid fa-film"></i></span><h2>No {{ media_type }} titles found</h2><p>Try a different title or clear the search to show the full library.</p><button onclick="clearSearch()" class="btn-ui btn-primary"><i class="fa-solid fa-layer-group"></i> Show all</button></section>
+
+  <section id="pagination" class="library-pagination hidden"><div id="pagination-inner"></div></section>
+  <section id="media-info" class="library-info hidden"><span id="results-info"></span><span id="db-info"></span></section>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>window.TG_STREMIO_PAGE = { mediaType: {{ media_type | tojson }} };</script>
+<script src="/static/js/pages/media-library.js?v=3.6.120" defer></script>
+{% endblock %}

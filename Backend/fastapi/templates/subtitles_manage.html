@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Subtitles · TG Stremio{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="/static/css/pages/subtitles.css?v=3.6.120">{% endblock %}
+
+{% block content %}
+<div class="studio-page subtitles-page">
+  <header class="page-topline subtitles-topline">
+    <div>
+      <div class="page-overline"><i class="fa-solid fa-closed-captioning"></i> Subtitle intelligence</div>
+      <h1 class="page-title">Subtitle library</h1>
+      <p class="page-subtitle">Review Telegram subtitle files, confirm detected language and link anything that needs a media match.</p>
+    </div>
+    <div class="subtitle-page-actions"><button onclick="relinkSubtitles()" class="btn-ui btn-primary"><i class="fa-solid fa-wand-magic-sparkles"></i> Match unmatched</button><a href="/admin/tools" class="btn-ui btn-ghost"><i class="fa-solid fa-magnifying-glass"></i> Scan channels</a></div>
+  </header>
+
+  <section class="subtitle-command-grid">
+    <article class="metric-card"><span class="metric-icon"><i class="fa-solid fa-file-lines"></i></span><p class="metric-label">Indexed files</p><p id="total-stat" class="metric-value">—</p><span class="metric-note">All subtitle documents</span></article>
+    <article class="metric-card subtitle-ready"><span class="metric-icon"><i class="fa-solid fa-link"></i></span><p class="metric-label">Ready to play</p><p id="matched-stat" class="metric-value">—</p><span class="metric-note">Linked to media</span></article>
+    <article class="metric-card subtitle-review"><span class="metric-icon"><i class="fa-solid fa-magnifying-glass"></i></span><p class="metric-label">Needs review</p><p id="unmatched-stat" class="metric-value">—</p><span class="metric-note">Manual link needed</span></article>
+  </section>
+
+  <section class="subtitle-filter surface">
+    <div class="filter-search"><i class="fa-solid fa-magnifying-glass"></i><input id="search-input" type="search" placeholder="Search title, filename or IMDb ID"></div>
+    <div class="ui-choice-field"><select id="status-filter" class="ui-choice-select"><option value="all">All status</option><option value="matched">Matched</option><option value="unmatched">Unmatched</option></select><button type="button" id="status-filter-trigger" class="ui-choice-trigger" onclick="openSubtitleChoice('status-filter','Subtitle status')"><span>All status</span><i class="fa-solid fa-chevron-down"></i></button></div>
+    <div class="ui-choice-field"><select id="language-filter" class="ui-choice-select"><option value="">All languages</option></select><button type="button" id="language-filter-trigger" class="ui-choice-trigger" onclick="openSubtitleChoice('language-filter','Subtitle language')"><span>All languages</span><i class="fa-solid fa-chevron-down"></i></button></div>
+    <button onclick="loadSubtitles(1)" class="btn-ui btn-primary"><i class="fa-solid fa-filter"></i><span>Apply</span></button>
+  </section>
+
+  <section id="loading" class="subtitle-loading hidden"><span><i class="fa-solid fa-spinner fa-spin"></i></span><strong>Loading subtitle records</strong><small>Reading linked documents from storage…</small></section>
+  <section id="empty" class="subtitle-empty hidden"><span><i class="fa-solid fa-closed-captioning"></i></span><h2>No subtitle files found</h2><p>Upload subtitle documents to an authorised channel, then run a Subtitle or Everything scan.</p></section>
+  <section id="subtitle-list" class="subtitle-list"></section>
+  <section id="pagination" class="subtitle-pagination hidden"><div id="pagination-inner"></div></section>
+  <p class="subtitle-note"><i class="fa-solid fa-circle-info"></i> Removing a record only clears the subtitle index. The source Telegram document stays untouched.</p>
+</div>
+
+<div id="link-dialog" class="subtitle-modal-shell hidden" aria-hidden="true">
+  <div class="subtitle-modal-card" role="dialog" aria-modal="true" aria-labelledby="link-dialog-title">
+    <div class="subtitle-modal-handle"></div>
+    <button type="button" aria-label="Close manual media link" class="icon-action subtitle-dialog-close" onclick="closeLinkDialog()"><i class="fa-solid fa-xmark"></i></button>
+    <div class="subtitle-dialog-head"><div><span class="page-kicker">Manual media link</span><h2 id="link-dialog-title">Link subtitle</h2><p id="link-dialog-file"></p></div></div>
+    <div class="subtitle-dialog-tip"><i class="fa-solid fa-circle-info"></i><span>Use an IMDb ID already indexed in your library. Add season and episode only for series files.</span></div>
+    <div class="subtitle-dialog-fields"><label class="wide">IMDb ID<input id="link-imdb" placeholder="tt1234567"></label><label>Season<input id="link-season" type="number" min="0" placeholder="Optional"></label><label>Episode<input id="link-episode" type="number" min="0" placeholder="Optional"></label><label class="wide">Subtitle language<div class="ui-choice-field subtitle-choice-field"><select id="link-language" class="ui-choice-select"></select><button type="button" id="link-language-trigger" class="ui-choice-trigger subtitle-choice-trigger" onclick="openSubtitleChoice('link-language','Subtitle language')"><span>Unknown (und)</span><i class="fa-solid fa-chevron-down"></i></button></div></label></div>
+    <div class="modal-actions"><button type="button" class="btn-ui btn-ghost" onclick="closeLinkDialog()">Cancel</button><button type="button" onclick="saveManualLink()" class="btn-ui btn-primary"><i class="fa-solid fa-link"></i> Save link</button></div>
+  </div>
+</div>
+{% endblock %}
+{% block extra_scripts %}<script src="/static/js/pages/subtitles.js?v=3.6.120" defer></script>{% endblock %}

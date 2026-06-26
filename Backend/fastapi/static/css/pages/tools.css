@@ -1,0 +1,96 @@
+/* Scanner tools · v3.5.4 */
+.tools-page { max-width: 1460px; margin: 0 auto; }
+.tools-layout { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(320px, .75fr); gap: 16px; align-items: start; }
+.tool-workspace { min-width: 0; padding: 18px; }
+.tool-workspace-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding-bottom: 15px; border-bottom: 1px solid var(--line); }
+.tool-workspace-head > div { display: flex; align-items: flex-start; min-width: 0; gap: 11px; }
+.tool-symbol { display: grid; flex: 0 0 auto; width: 36px; height: 36px; place-items: center; color: var(--primary); border: 1px solid color-mix(in srgb, var(--primary) 26%, var(--line)); border-radius: 11px; background: color-mix(in srgb, var(--primary) 10%, transparent); }
+.tool-symbol.health { color: var(--positive); border-color: color-mix(in srgb, var(--positive) 30%, var(--line)); background: color-mix(in srgb, var(--positive) 10%, transparent); }
+.tool-workspace-head h2 { margin: 0; color: var(--text); font-size: 15px; font-weight: 850; letter-spacing: -.025em; }
+.tool-workspace-head p { margin: 4px 0 0; color: var(--muted); font-size: 11px; line-height: 1.42; }
+.scanner-section { padding: 15px 0; border-bottom: 1px solid var(--line); }
+.scanner-label-row, .scanner-progress-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.scanner-label-row { margin-bottom: 10px; }
+.scanner-label-row > label, .dead-link-head > div:first-child > label { color: var(--text); font-size: 10px; font-weight: 850; letter-spacing: .09em; text-transform: uppercase; }
+.scanner-label-row > span { color: var(--muted); font-size: 10px; }
+.scanner-label-row > div { display: inline-flex; gap: 9px; }
+.text-button { min-height: auto; padding: 0; color: var(--primary); border: 0; border-radius: 0 !important; background: transparent; font-size: 10px; font-weight: 850; }
+.text-button:hover { color: var(--accent); background: transparent; transform: none; }
+.channel-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
+.channel-loading, .dead-empty { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; }
+.channel-chip { display: flex; align-items: center; min-width: 0; gap: 9px; min-height: 52px; padding: 9px 10px; color: var(--muted); border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); cursor: pointer; transition: border-color .16s ease, background .16s ease, transform .16s ease; }
+.channel-chip:hover { border-color: var(--line-strong); transform: translateY(-1px); }
+.channel-chip input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.channel-check { display: grid; flex: 0 0 auto; width: 22px; height: 22px; place-items: center; color: transparent; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-1); font-size: 10px; transition: color .16s ease, background .16s ease, border-color .16s ease; }
+.channel-copy { display: grid; min-width: 0; gap: 1px; }
+.channel-copy strong { overflow: hidden; color: var(--text); font-size: 11px; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
+.channel-copy small { overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.channel-chip.selected { border-color: color-mix(in srgb, var(--primary) 58%, var(--line)); background: color-mix(in srgb, var(--primary) 10%, var(--surface-2)); }
+.channel-chip.selected .channel-check { color: #fff; border-color: var(--primary); background: var(--primary); }
+.scan-scope-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.scan-scope-choice { position: relative; display: block; min-width: 0; cursor: pointer; }
+.scan-scope-choice input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.scope-card { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; min-height: 76px; gap: 9px; padding: 11px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); transition: transform .16s ease, border-color .16s ease, background .16s ease, box-shadow .16s ease; }
+.scan-scope-choice:hover .scope-card { border-color: var(--line-strong); transform: translateY(-1px); }
+.scan-scope-choice input:checked + .scope-card { border-color: color-mix(in srgb, var(--primary) 58%, var(--line)); background: color-mix(in srgb, var(--primary) 10%, var(--surface-2)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 12%, transparent); }
+.scope-icon { display: grid; width: 30px; height: 30px; place-items: center; color: var(--primary); border: 1px solid color-mix(in srgb, var(--primary) 26%, var(--line)); border-radius: 9px; background: color-mix(in srgb, var(--primary) 9%, transparent); font-size: 11px; }
+.scope-copy { display: grid; min-width: 0; gap: 2px; }
+.scope-copy strong { overflow: hidden; color: var(--text); font-size: 11px; font-weight: 850; text-overflow: ellipsis; white-space: nowrap; }
+.scope-copy small { overflow: hidden; color: var(--muted); font-size: 9px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+.scope-check { display: grid; width: 19px; height: 19px; place-items: center; color: transparent; border: 1px solid var(--line); border-radius: 99px; background: var(--surface-1); font-size: 8px; transition: color .16s ease, background .16s ease, border-color .16s ease; }
+.scan-scope-choice input:checked + .scope-card .scope-check { color: #fff; border-color: var(--primary); background: var(--primary); }
+.scanner-hint { display: flex; gap: 7px; margin: 11px 0 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.scanner-hint i { flex: 0 0 auto; margin-top: 2px; color: var(--primary); }
+.scanner-progress { padding: 15px 0; }
+.scanner-progress-head { margin-bottom: 8px; }
+.scanner-progress-head strong { overflow: hidden; color: var(--text); font-size: 11px; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
+.scanner-progress-head span { color: var(--muted); font-size: 10px; white-space: nowrap; }
+.scanner-progress-head b { color: var(--text); }
+
+/* Compact scan detail — uses the original scanner layout and font scale. */
+.scan-progress-copy { overflow: hidden; margin: 0 0 8px; color: var(--primary); font-size: 10px; font-weight: 800; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
+.scan-stat-grid, .health-stat-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; }
+.health-stat-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.scan-stat { display: grid; min-width: 0; gap: 3px; padding: 10px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-2); }
+.scan-stat strong { overflow: hidden; color: var(--text); font-size: 17px; font-weight: 850; letter-spacing: -.04em; text-overflow: ellipsis; white-space: nowrap; }
+.scan-stat span { color: var(--muted); font-size: 8px; font-weight: 850; letter-spacing: .07em; line-height: 1.28; text-transform: uppercase; }
+.scan-stat-wide { grid-column: 3 / span 2; }
+.scan-stat.positive strong { color: var(--positive); }
+.scan-stat.warning strong { color: var(--warning); }
+.scan-stat.danger strong { color: var(--danger); }
+.tool-actions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; padding-top: 15px; }
+.tool-actions .btn-ui { min-width: 0; padding: 0 8px; font-size: 10px; white-space: nowrap; }
+.tool-actions .btn-ui i { flex: 0 0 auto; }
+.tool-error { display: none; margin: 10px 0 0; color: var(--danger); font-size: 10px; }
+.dead-link-section { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
+.dead-link-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.dead-link-head > div:first-child { display: grid; gap: 4px; min-width: 0; }
+.dead-link-head p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.4; }
+.dead-link-head > div:last-child { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.dead-link-head .btn-ui { min-height: 34px; padding: 0 9px; font-size: 10px; }
+.dead-list { display: grid; gap: 7px; max-height: 266px; margin-top: 12px; overflow: auto; }
+.dead-list > div { border-color: var(--line) !important; background: var(--surface-2) !important; }
+.status-running { color: var(--positive); }
+
+@media (max-width: 1120px) { .tools-layout { grid-template-columns: 1fr; } }
+@media (max-width: 760px) {
+  .tool-workspace { padding: 14px; }
+  .scan-scope-grid { grid-template-columns: 1fr; }
+  .scope-card { min-height: 61px; }
+  .scan-progress-copy { margin-bottom: 8px; }
+  .scan-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .scan-stat-wide { grid-column: 1 / -1; }
+  .health-stat-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .tool-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dead-link-head { align-items: stretch; flex-direction: column; }
+  .dead-link-head > div:last-child { display: grid; grid-template-columns: 1fr 1fr; }
+  .dead-link-head .btn-ui { width: 100%; }
+}
+@media (max-width: 430px) {
+  .channel-list { grid-template-columns: 1fr; }
+  .tool-workspace-head h2 { font-size: 14px; }
+  .tool-workspace-head p { font-size: 10px; }
+  .tool-actions .btn-ui span { overflow: hidden; text-overflow: ellipsis; }
+  .health-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dead-link-head > div:last-child { grid-template-columns: 1fr; }
+}

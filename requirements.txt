@@ -1,0 +1,14 @@
+aiofiles
+fastapi
+httpx
+motor
+parse-torrent-title
+pyrofork
+python-dotenv
+pytz
+tgcrypto
+themoviedb
+uvicorn
+uv
+uvloop
+httptools

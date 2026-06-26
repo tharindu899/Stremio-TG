@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 720" role="img" aria-labelledby="title desc">
+  <title id="title">No poster available</title>
+  <desc id="desc">A simple TG Stremio media placeholder</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0f172a"/>
+      <stop offset="1" stop-color="#1e293b"/>
+    </linearGradient>
+    <linearGradient id="mark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#06b6d4"/>
+      <stop offset="1" stop-color="#0891b2"/>
+    </linearGradient>
+  </defs>
+  <rect width="480" height="720" fill="url(#bg)"/>
+  <rect x="22" y="22" width="436" height="676" rx="24" fill="none" stroke="#334155" stroke-width="2"/>
+  <rect x="152" y="253" width="176" height="176" rx="42" fill="url(#mark)"/>
+  <path d="M221 302 285 341 221 380Z" fill="#fff" opacity=".94"/>
+  <text x="240" y="490" fill="#94a3b8" font-family="system-ui, sans-serif" font-size="28" font-weight="700" text-anchor="middle">TG STREMIO</text>
+  <text x="240" y="527" fill="#64748b" font-family="system-ui, sans-serif" font-size="19" text-anchor="middle">Poster unavailable</text>
+</svg>
