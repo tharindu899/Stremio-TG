@@ -76,3 +76,278 @@
 .modal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:20px; }
 @media(max-width:1100px){.dashboard-layout{grid-template-columns:1fr}.stream-panel{min-height:0}.stream-list{max-height:280px}}
 @media(max-width:760px){.dashboard-refresh{width:100%}.node-grid{grid-template-columns:1fr}.access-panel-head{align-items:flex-start; flex-direction:column; padding:16px}.access-panel-head .btn-ui{width:100%}.token-create{padding:14px}.token-create form{grid-template-columns:1fr}.token-create-actions{display:grid; grid-template-columns:1fr 1fr}.token-table-wrap{display:none}.token-mobile-list{display:grid; gap:8px; padding:12px}.token-mobile-card{display:grid; gap:12px; padding:13px; border:1px solid var(--line); border-radius:12px; background:var(--surface-2)}.token-mobile-head{display:flex; justify-content:space-between; gap:10px}.token-mobile-stats{display:grid; grid-template-columns:1fr 1fr; gap:8px; padding:9px 0; border-top:1px solid var(--line); border-bottom:1px solid var(--line); color:var(--muted); font-size:10px}.token-mobile-stats b{display:block; margin-top:3px; color:var(--text);font-size:12px}.manifest-action{width:100%}.modal-fields{grid-template-columns:1fr}.modal-actions{display:grid;grid-template-columns:1fr 1fr}.library-shortcuts{grid-template-columns:1fr}.node-counts{grid-template-columns:repeat(3,minmax(0,1fr))}}
+
+/* Mobile containment for storage and stream dashboard panels */
+.dashboard-layout,
+.storage-panel,
+.stream-panel,
+.node-grid,
+.node-card,
+.stream-list,
+.stream-card,
+.stream-row,
+.stream-totals,
+.stream-totals > div {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.storage-panel,
+.stream-panel {
+  overflow: hidden;
+}
+
+.node-card-top > div,
+.node-counts > div,
+.stream-row-top > div,
+.stream-card-copy,
+.stream-card-meta,
+.stream-card-details dd {
+  min-width: 0;
+}
+
+.node-counts strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stream-totals strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Live cards are rendered by JavaScript, so keep their layout independent of Tailwind. */
+.stream-card {
+  display: grid;
+  gap: 11px;
+  padding: 12px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--surface-2);
+}
+
+.stream-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  min-width: 0;
+}
+
+.stream-card-copy {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 3px;
+}
+
+.stream-card-title {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stream-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 6px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 760;
+  letter-spacing: .05em;
+  line-height: 1.35;
+  text-transform: uppercase;
+}
+
+.stream-card-meta .stream-card-id {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stream-badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  min-height: 22px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--surface-3);
+  font-size: 9px;
+  font-weight: 850;
+  letter-spacing: .07em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.stream-badge-live,
+.stream-badge-complete {
+  color: var(--positive);
+  border-color: color-mix(in srgb, var(--positive) 37%, var(--line));
+  background: color-mix(in srgb, var(--positive) 9%, var(--surface-2));
+}
+
+.stream-badge-warning {
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 37%, var(--line));
+  background: color-mix(in srgb, var(--warning) 9%, var(--surface-2));
+}
+
+.stream-badge-error {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 37%, var(--line));
+  background: color-mix(in srgb, var(--danger) 9%, var(--surface-2));
+}
+
+.stream-card-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.stream-card-stat {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.stream-card-stat span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 850;
+  letter-spacing: .08em;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.stream-card-stat strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stream-card-details {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.stream-card-details > div {
+  display: grid;
+  grid-template-columns: minmax(56px, auto) minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.stream-card-details dt {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 760;
+}
+
+.stream-card-details dd {
+  margin: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 740;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stream-card-details code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+@media (max-width: 460px) {
+  .storage-panel .section-heading {
+    gap: 10px;
+  }
+
+  .storage-panel .mini-tab {
+    min-width: 0;
+    padding: 0 10px;
+  }
+
+  .node-card {
+    padding: 13px;
+  }
+
+  .node-card-top {
+    gap: 8px;
+  }
+
+  .node-card-top .status-pill {
+    min-width: 0;
+    padding: 0 6px;
+    font-size: 8px;
+    letter-spacing: .035em;
+  }
+
+  .node-counts {
+    gap: 7px;
+    margin: 14px 0;
+  }
+
+  .node-counts span,
+  .node-meter-label {
+    font-size: 8px;
+    letter-spacing: .055em;
+  }
+
+  .node-counts strong {
+    font-size: 11px;
+  }
+
+  .stream-totals {
+    gap: 7px;
+  }
+
+  .stream-totals div {
+    padding: 11px;
+  }
+
+  .stream-totals strong {
+    font-size: 18px;
+  }
+}
+
+@media (max-width: 360px) {
+  .storage-panel .section-heading .mini-tab i {
+    display: none;
+  }
+
+  .node-card-top .status-pill {
+    display: none;
+  }
+
+  .stream-card {
+    padding: 11px;
+  }
+
+  .stream-card-details > div {
+    gap: 7px;
+  }
+}
+

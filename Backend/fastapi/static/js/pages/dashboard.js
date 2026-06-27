@@ -204,7 +204,12 @@ const streamState = {
         if (!value) return '—';
         const date = new Date(value * 1000);
         if (Number.isNaN(date.getTime())) return '—';
-        return date.toLocaleString();
+        return date.toLocaleString(undefined, {
+            month: 'short',
+            day: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit'
+        });
     }
 
     function getStreamTitle(stream) {
@@ -229,13 +234,13 @@ const streamState = {
             return { className: 'stream-badge-live', text: 'Live' };
         }
         if (normalized === 'cancelled') {
-            return { className: 'bg-yellow-500/15 text-yellow-300', text: 'Cancelled' };
+            return { className: 'stream-badge-warning', text: 'Cancelled' };
         }
         if (normalized === 'completed' || normalized === 'finished') {
-            return { className: 'bg-green-500/15 text-green-300', text: 'Completed' };
+            return { className: 'stream-badge-complete', text: 'Completed' };
         }
         if (normalized === 'failed' || normalized === 'error') {
-            return { className: 'bg-red-500/15 text-red-300', text: normalized.charAt(0).toUpperCase() + normalized.slice(1) };
+            return { className: 'stream-badge-error', text: normalized.charAt(0).toUpperCase() + normalized.slice(1) };
         }
 
         return {
@@ -262,62 +267,43 @@ const streamState = {
             : '—';
         const started = formatTimestamp(stream?.start_ts);
         const liveDuration = getLiveDuration(stream);
+        const statusText = escapeHtml(status.text);
+        const statusValue = escapeHtml(stream?.status || 'active');
 
         return `
-            <div class="stream-card rounded-[2rem] p-5">
-                <div class="flex justify-between items-start gap-3">
-                    <div class="min-w-0 pr-2">
-                        <h5 class="font-bold text-sm text-text truncate">${title}</h5>
-                        <div class="mt-1 flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-widest text-text-secondary">
+            <article class="stream-card">
+                <div class="stream-card-head">
+                    <div class="stream-card-copy">
+                        <strong class="stream-card-title" title="${title}">${title}</strong>
+                        <div class="stream-card-meta">
                             <span>${label}</span>
-                            <span>•</span>
-                            <span>${streamId}</span>
+                            <span class="stream-card-id" title="${streamId}">${streamId}</span>
                         </div>
                     </div>
-                    <span class="text-[10px] font-bold px-2 py-1 rounded-lg uppercase whitespace-nowrap ${status.className}">
-                        ${escapeHtml(status.text)}
-                    </span>
+                    <span class="stream-badge ${status.className}">${statusText}</span>
                 </div>
 
-                <div class="grid grid-cols-2 gap-3 mt-4 pt-4 border-t border-white/5">
-                    <div class="text-center">
-                        <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">Speed</p>
-                        <p class="text-xs font-bold text-text">${avgSpeed}</p>
-                    </div>
-                    <div class="text-center">
-                        <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">Total</p>
-                        <p class="text-xs font-bold text-text">${escapeHtml(totalBytes)}</p>
-                    </div>
-                    <div class="text-center">
-                        <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">Duration</p>
-                        <p class="text-xs font-bold text-text live-duration">${escapeHtml(liveDuration)}</p>
-                    </div>
-                    <div class="text-center">
-                        <p class="text-[9px] text-text-secondary uppercase tracking-widest font-bold">Started</p>
-                        <p class="text-xs font-bold text-text truncate live-started">${escapeHtml(started)}</p>
-                    </div>
+                <div class="stream-card-stats">
+                    <div class="stream-card-stat"><span>Speed</span><strong title="${avgSpeed}">${avgSpeed}</strong></div>
+                    <div class="stream-card-stat"><span>Total</span><strong title="${totalBytes}">${escapeHtml(totalBytes)}</strong></div>
+                    <div class="stream-card-stat"><span>Duration</span><strong class="live-duration" title="${liveDuration}">${escapeHtml(liveDuration)}</strong></div>
+                    <div class="stream-card-stat"><span>Started</span><strong class="live-started" title="${started}">${escapeHtml(started)}</strong></div>
                 </div>
 
-                <div class="mt-4 pt-4 border-t border-white/5 space-y-2">
-                    <div class="flex items-center justify-between text-xs gap-3">
-                        <span class="text-text-secondary">Stream ID</span>
-                        <span class="font-mono text-text text-right truncate max-w-[65%]">${streamId}</span>
-                    </div>
-                    <div class="flex items-center justify-between text-xs gap-3">
-                        <span class="text-text-secondary">Status</span>
-                        <span class="text-text text-right truncate max-w-[65%]">${escapeHtml(stream?.status || 'active')}</span>
-                    </div>
-                </div>
-            </div>
+                <dl class="stream-card-details">
+                    <div><dt>Stream ID</dt><dd><code title="${streamId}">${streamId}</code></dd></div>
+                    <div><dt>Status</dt><dd title="${statusValue}">${statusValue}</dd></div>
+                </dl>
+            </article>
         `;
     }
 
     function renderEmptyState(icon, title, subtitle) {
         return `
-            <div class="glass-panel p-8 rounded-[2rem] text-center border-dashed border-white/10">
-                <i class="${icon} text-4xl text-white/10 mb-3"></i>
-                <p class="text-sm text-text-secondary font-medium">${escapeHtml(title)}</p>
-                <p class="text-xs text-text-secondary mt-1">${escapeHtml(subtitle)}</p>
+            <div class="stream-empty">
+                <span><i class="${icon}"></i></span>
+                <strong>${escapeHtml(title)}</strong>
+                <small>${escapeHtml(subtitle)}</small>
             </div>
         `;
     }

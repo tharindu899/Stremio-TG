@@ -1,3 +1,12 @@
+---
+title: TG Stremio
+emoji: 🎬
+colorFrom: blue
+colorTo: purple
+sdk: docker
+app_port: 7860
+pinned: false
+---
 
 <p align="center">
   <img src="https://iili.io/CAptcXV.md.png" alt="Logo" width="400"/>
