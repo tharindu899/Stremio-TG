@@ -97,21 +97,39 @@ Stremio-TG turns Telegram channels into a private media library.
 4. It stores stream references in MongoDB rather than downloading the media to your server.
 5. Stremio or Nuvio uses your personal add-on URL to browse, stream, and load linked subtitles.
 
-```text
-📥 Telegram channel
-      │
-      ▼
-🤖 Stremio-TG bot + scanner
-      │
-      ▼
-🗄️ MongoDB metadata and stream references
-      │
-      ▼
-⚙️ FastAPI add-on endpoints
-      │
-      ▼
-📺 Stremio / Nuvio playback
+### 🪄 Media Flow — From Upload to Playback
+
+```mermaid
+flowchart TB
+    TG["📥 Telegram Channel<br/>Movies · TV · Subtitles · Split files"]
+    BOT["🤖 Stremio-TG Bot & Scanner<br/>Detect · Parse · Match · Index"]
+    DB[("🗄️ MongoDB<br/>Metadata · Subtitle links · Stream references")]
+    API["⚙️ FastAPI Add-on<br/>Catalog · Meta · Stream · Subtitle endpoints"]
+    APP["📺 Stremio / Nuvio<br/>Browse · Select · Stream · Play"]
+
+    TG -->|"📤 Forward or upload"| BOT
+    BOT -->|"🔎 Scan & save"| DB
+    DB <-->|"🔄 Read & update"| API
+    API -->|"🔗 Personal manifest URL"| APP
+
+    classDef telegram fill:#229ED9,stroke:#168AC0,color:#ffffff,stroke-width:2px;
+    classDef bot fill:#6A5ACD,stroke:#5143AF,color:#ffffff,stroke-width:2px;
+    classDef database fill:#47A248,stroke:#357D37,color:#ffffff,stroke-width:2px;
+    classDef api fill:#009688,stroke:#007A6F,color:#ffffff,stroke-width:2px;
+    classDef player fill:#7D3C98,stroke:#642F7A,color:#ffffff,stroke-width:2px;
+
+    class TG telegram;
+    class BOT bot;
+    class DB database;
+    class API api;
+    class APP player;
 ```
+
+<p align="center">
+  <sub>📌 Your media stays in Telegram · 🗄️ MongoDB keeps lightweight references · ⚡ FastAPI delivers playback links to your media app</sub>
+</p>
+
+> 💡 **No local media copy required:** the server indexes and streams your Telegram media. It does not download your full library to the host server.
 
 > ⚖️ **Use responsibly:** Stremio-TG is intended for media you are authorized to store and access. Keep Telegram channels, database credentials, bot tokens, and add-on tokens private.
 
