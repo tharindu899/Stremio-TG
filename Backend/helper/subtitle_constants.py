@@ -14,6 +14,12 @@ SUBTITLE_MIME_TYPES = {
     ".sami": "text/plain; charset=utf-8",
 }
 
+# Fallback used only after filename/caption language detection cannot identify
+# any supported language.  This keeps unlabelled subtitle uploads usable in the
+# Sinhala-first library while preserving every explicit language label.
+DEFAULT_SUBTITLE_LANGUAGE = "si"
+
+
 SUBTITLE_MIME_PREFIXES = (
     "application/x-subrip",
     "application/x-srt",

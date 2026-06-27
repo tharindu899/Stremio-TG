@@ -40,16 +40,30 @@ _RAW_SUFFIX_PATTERNS = (
         re.I,
     ),
     # Movie.part001.mkv / Movie.CD 2.mp4 / Movie.Disc-03.mkv.
-    # This must precede the generic numeric-before-extension form so `CD 2`
+    # Keep explicit labels before any future broad filename rules so `CD 2`
     # and `Disc-03` do not become part of the base title.
     re.compile(
         rf"^(?P<base>.+?)[.\-_ ]+(?:part|pt|cd|disc|disk)[.\-_ ]*(?P<part>\d{{1,5}})\.(?P<ext>{_VIDEO_EXTENSIONS})$",
         re.I,
     ),
-    # Movie.001.mkv.  Keep this dot-only: names such as
-    # `Series - 001.mkv` and `Series 001.mkv` are normal anime episode
-    # releases, not concatenation parts.
-    re.compile(rf"^(?P<base>.+?)\.(?P<part>\d{{1,5}})\.(?P<ext>{_VIDEO_EXTENSIONS})$", re.I),
+    # Deliberately no generic `Movie.001.mkv` rule here. A final bare number
+    # is ambiguous: it is commonly a resolution/size marker or an episode
+    # number (`...720.mkv`, `...1080p.1.mkv`, `...E05.6.mkv`). Treating it as
+    # a split part corrupts unrelated media by merging files with the same
+    # shortened base. Use an explicit marker (`part`, `cd`, `disc`) or put the
+    # part after the extension (`Movie.mkv.001`) for raw byte splits.
+)
+
+
+# Legacy raw split volumes use the historical `Movie.001.mkv` form.
+# This form is ambiguous when viewed in isolation, so it is *never* accepted by
+# `detect_split_file`.  Channel rescans can opt into it only after they see a
+# matching, consecutive sibling sequence such as `.001.mkv` + `.002.mkv`.
+# Requiring a leading zero also keeps values such as `.1.mkv`, `.6.mkv`,
+# `.108.mkv`, `.216.mkv`, and `.720.mkv` outside the legacy candidate path.
+_LEGACY_BARE_RAW_RE = re.compile(
+    rf"^(?P<base>.+)\.(?P<part>0\d{{2,4}})\.(?P<ext>{_VIDEO_EXTENSIONS})$",
+    re.I,
 )
 
 
@@ -193,8 +207,12 @@ def _generic_zip_info(
 def detect_split_file(filename: str) -> Optional[SplitFileInfo]:
     """Return split metadata for a supported filename, otherwise ``None``.
 
-    Supported direct-video forms include ``.mkv.001``, ``.001.mkv``,
-    ``.part001.mkv``, ``.mkv.part001``, ``.CD1.mkv`` and ``.Disc-02.mkv``.
+    Supported direct-video forms include ``.mkv.001``, ``.part001.mkv``,
+    ``.mkv.part001``, ``.CD1.mkv`` and ``.Disc-02.mkv``. Bare numeric names
+    such as ``.001.mkv`` are intentionally treated as ordinary videos here
+    because they are ambiguous without sibling-file context.  The channel
+    scanner may promote a zero-padded `.001/.002/...` sequence only after
+    validating every consecutive sibling part.
     Supported archive forms include ``.mkv.zip.001``, media-labelled
     ``Release.2026.2160p.WEB-DL.zip.001``, and standard ``.z01`` + final
     ``.zip`` volume sets.
@@ -233,6 +251,86 @@ def detect_split_file(filename: str) -> Optional[SplitFileInfo]:
         return _zip_info(match, 1_000_000)
 
     return None
+
+
+def detect_legacy_bare_split_candidate(filename: str) -> Optional[SplitFileInfo]:
+    """Return a *context-only* candidate for `Movie.001.mkv` style volumes.
+
+    A bare numeric suffix is deliberately not a normal split-file format: by
+    itself it can be a resolution, an episode number, or a release tag.  This
+    helper only identifies zero-padded candidates.  Call
+    :func:`resolve_legacy_bare_split_candidates` with sibling files before
+    treating the result as a real split stream.
+    """
+    if not filename:
+        return None
+    match = _LEGACY_BARE_RAW_RE.match(_clean_candidate(filename))
+    return _raw_info(match) if match else None
+
+
+def find_legacy_bare_split_source(*candidates: object) -> tuple[str | None, SplitFileInfo | None]:
+    """Find a contextual bare-number split candidate in a filename or caption.
+
+    This mirrors :func:`find_split_source`, but does not make a candidate valid
+    on its own.  The scanner performs sibling-sequence validation afterwards.
+    """
+    for candidate in candidates:
+        raw = _clean_candidate(candidate)
+        if not raw:
+            continue
+        info = detect_legacy_bare_split_candidate(raw)
+        if info:
+            return raw, info
+        for line in raw.splitlines():
+            line = _clean_candidate(line)
+            if not line:
+                continue
+            info = detect_legacy_bare_split_candidate(line)
+            if info:
+                return line, info
+            for token in (line.split(" — ")[0], line.split(" - ")[0]):
+                token = _clean_candidate(token)
+                info = detect_legacy_bare_split_candidate(token)
+                if info:
+                    return token, info
+    return None, None
+
+
+def resolve_legacy_bare_split_candidates(
+    candidates: list[tuple[object, SplitFileInfo]],
+) -> dict[object, SplitFileInfo]:
+    """Validate legacy bare-number volumes against their sibling sequence.
+
+    A group is accepted only when all of the following are true:
+
+    * at least two distinct parts are present;
+    * numbering begins at `.001` (or the uncommon `.000`); and
+    * every number through the final observed part is consecutive.
+
+    A single `Movie.001.mkv`, a gap such as `.001` + `.003`, and non-zero-
+    padded endings remain ordinary videos.  The result maps the caller's token
+    (usually a Telegram message ID) to the already-normalized split metadata.
+    """
+    grouped: dict[str, list[tuple[object, SplitFileInfo]]] = {}
+    for token, info in candidates:
+        if not isinstance(info, SplitFileInfo) or info.kind != "raw":
+            continue
+        grouped.setdefault(info.group_key, []).append((token, info))
+
+    resolved: dict[object, SplitFileInfo] = {}
+    for members in grouped.values():
+        part_numbers = {info.part_number for _, info in members}
+        if len(part_numbers) < 2:
+            continue
+        start = 0 if 0 in part_numbers else 1
+        end = max(part_numbers)
+        if min(part_numbers) != start or end <= start:
+            continue
+        if part_numbers != set(range(start, end + 1)):
+            continue
+        for token, info in members:
+            resolved[token] = info
+    return resolved
 
 
 def parse_split_info(filename: str) -> Optional[Tuple[str, int]]:

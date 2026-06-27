@@ -12,7 +12,14 @@ from Backend.helper.metadata import metadata
 from Backend.helper.pyro import clean_filename, get_readable_file_size, remove_urls
 from Backend.helper.subtitle_service import index_subtitle, relink_unmatched_subtitles
 from Backend.helper.subtitle_constants import is_subtitle_file
-from Backend.helper.split_files import detect_split_file, detect_split_upload, strip_part_suffix, find_split_source, split_metadata_fields
+from Backend.helper.split_files import (
+    detect_split_upload,
+    strip_part_suffix,
+    find_split_source,
+    find_legacy_bare_split_source,
+    resolve_legacy_bare_split_candidates,
+    split_metadata_fields,
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -643,6 +650,7 @@ class ScanManager:
         empty_streak = 0
         batch_count = 0
         last_seen_message_id = current - 1
+        previous_legacy_candidates: List[tuple[int, str, Any]] = []
 
         while current < upper_bound:
             if self._cancel:
@@ -701,9 +709,25 @@ class ScanManager:
             # Metadata lookup is the slow path. Resolve a few files in parallel,
             # then commit their database updates in their original Telegram order.
             if batch_messages:
+                # Legacy `.001.mkv` volumes are accepted only after adjacent
+                # sibling parts pass the contextual consecutive-sequence check.
+                split_overrides, previous_legacy_candidates = await self._legacy_bare_split_overrides(
+                    client,
+                    chat_id,
+                    batch_messages,
+                    previous_legacy_candidates,
+                    batch_end,
+                    upper_bound,
+                )
                 # The ordered commit gate advances Processed/current message only
                 # after each message has really finished indexing.
-                await self._process_messages_fast(batch_messages, chat_id)
+                await self._process_messages_fast(
+                    batch_messages,
+                    chat_id,
+                    split_overrides=split_overrides,
+                )
+            else:
+                previous_legacy_candidates = []
 
             empty_streak = 0 if batch_had_content else empty_streak + 1
             current = batch_end
@@ -725,7 +749,101 @@ class ScanManager:
         LOGGER.info(f"[ScanManager] Finished {state['current_channel_name']} at id {min(current - 1, target_id)}")
         return True
 
-    async def _process_messages_fast(self, messages: List[Any], chat_id: int) -> None:
+    @staticmethod
+    def _legacy_bare_split_candidate_for_message(message: Any):
+        """Return one contextual `.001.mkv` candidate from a media message.
+
+        This is intentionally separate from normal split detection.  A caller
+        must validate the candidate against sibling parts before it is used.
+        """
+        file = getattr(message, "video", None) or getattr(message, "document", None)
+        if file is None:
+            return None
+        message_id = int(getattr(message, "id", 0) or 0)
+        if message_id <= 0:
+            return None
+        raw_file_name = getattr(file, "file_name", "") or ""
+        caption = getattr(message, "caption", "") or ""
+        title = caption or raw_file_name
+        source, info = find_legacy_bare_split_source(
+            raw_file_name,
+            caption,
+            title,
+            clean_filename(raw_file_name),
+            clean_filename(caption),
+        )
+        return (message_id, source, info) if source and info else None
+
+    async def _legacy_bare_split_overrides(
+        self,
+        client,
+        chat_id: int,
+        current_messages: List[Any],
+        previous_candidates: List[tuple[int, str, Any]],
+        next_start: int,
+        upper_bound: int,
+    ) -> tuple[Dict[int, tuple[str, Any]], List[tuple[int, str, Any]]]:
+        """Resolve safe legacy `.001.mkv` groups for one scan batch.
+
+        The current batch is checked with the immediately preceding and next
+        batch.  This catches normal sequential Telegram uploads even when a
+        `.001`/`.002` boundary lands between two 200-message fetches, without
+        ever promoting a filename based on its suffix alone.
+        """
+        current_candidates = [
+            candidate
+            for message in current_messages
+            if (candidate := self._legacy_bare_split_candidate_for_message(message))
+        ]
+        if not current_candidates and not previous_candidates:
+            return {}, []
+
+        lookahead_candidates: List[tuple[int, str, Any]] = []
+        if next_start < upper_bound:
+            lookahead_end = min(next_start + SCAN_BATCH_SIZE, upper_bound)
+            try:
+                messages = await client.get_messages(chat_id, list(range(next_start, lookahead_end)))
+                if not isinstance(messages, list):
+                    messages = [messages]
+                for message in messages:
+                    if message is None or getattr(message, "empty", False):
+                        continue
+                    candidate = self._legacy_bare_split_candidate_for_message(message)
+                    if candidate:
+                        lookahead_candidates.append(candidate)
+            except FloodWait as exc:
+                # The real scan fetch handles FloodWait and retries its own
+                # batch.  This optional context lookup must never stall it.
+                LOGGER.info("[LegacySplit] Look-ahead postponed by FloodWait %ss.", exc.value)
+            except Exception as exc:
+                LOGGER.debug("[LegacySplit] Look-ahead unavailable at %s: %s", next_start, exc)
+
+        contextual = [
+            (message_id, info)
+            for message_id, _source, info in (previous_candidates + current_candidates + lookahead_candidates)
+        ]
+        accepted = resolve_legacy_bare_split_candidates(contextual)
+        overrides = {
+            message_id: (source, accepted[message_id])
+            for message_id, source, _info in current_candidates
+            if message_id in accepted
+        }
+        if overrides:
+            LOGGER.info(
+                "[LegacySplit] Accepted %s bare-number volume(s) after consecutive sibling validation.",
+                len(overrides),
+            )
+        # Keep only the directly previous batch. The look-ahead is queried again
+        # as its own real batch on the next loop, preserving scan ordering.
+        return overrides, current_candidates
+
+    async def _process_messages_fast(
+        self,
+        messages: List[Any],
+        chat_id: int,
+        *,
+        split_overrides: Optional[Dict[int, tuple[str, Any]]] = None,
+    ) -> None:
         """Resolve a Telegram batch concurrently while preserving commit order."""
         if not messages:
             return
@@ -735,9 +853,11 @@ class ScanManager:
 
         async def worker(slot: int, message: Any) -> None:
             async with limiter:
+                message_id = int(getattr(message, "id", 0) or 0)
                 await self._process_message(
                     message,
                     chat_id,
+                    split_override=(split_overrides or {}).get(message_id),
                     commit_gate=gate,
                     commit_slot=slot,
                 )
@@ -756,6 +876,7 @@ class ScanManager:
         message,
         chat_id: int,
         *,
+        split_override: tuple[str, Any] | None = None,
         commit_gate: _OrderedBatchCommit | None = None,
         commit_slot: int | None = None,
     ) -> None:
@@ -824,14 +945,17 @@ class ScanManager:
             caption = message.caption or ""
             title = caption or raw_file_name or "video.mkv"
             file_name = raw_file_name or title
-            split_source, split_info = find_split_source(
-                raw_file_name,
-                caption,
-                file_name,
-                title,
-                clean_filename(raw_file_name),
-                clean_filename(caption),
-            )
+            if split_override:
+                split_source, split_info = split_override
+            else:
+                split_source, split_info = find_split_source(
+                    raw_file_name,
+                    caption,
+                    file_name,
+                    title,
+                    clean_filename(raw_file_name),
+                    clean_filename(caption),
+                )
 
             # Full rescans used to rely only on filename matching.  Reuse the
             # live-upload MIME-aware fallback so generic `.zip.001` files remain
@@ -874,7 +998,12 @@ class ScanManager:
                 # preserving the part suffix, this keeps the live-upload and rescan
                 # group keys identical when filename cleanup removes codec tags.
                 metadata_input = metadata_source if split_info else clean_filename(metadata_source)
-                metadata_info = await metadata(metadata_input, channel_int, msg_id)
+                metadata_info = await metadata(
+                    metadata_input,
+                    channel_int,
+                    msg_id,
+                    split_info_override=split_info,
+                )
             except Exception as exc:
                 LOGGER.warning(f"[ScanManager] Metadata exception for msg {msg_id}: {exc}")
                 metadata_info = None

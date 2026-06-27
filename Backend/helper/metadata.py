@@ -13,7 +13,7 @@ from Backend.helper.settings_manager import SettingsManager
 import Backend
 from Backend.logger import LOGGER
 from Backend.helper.encrypt import encode_string
-from Backend.helper.split_files import detect_split_file, strip_part_suffix, split_metadata_fields
+from Backend.helper.split_files import SplitFileInfo, detect_split_file, strip_part_suffix, split_metadata_fields
 
 # ----------------- Configuration -----------------
 
@@ -1113,11 +1113,17 @@ def _map_absolute_episode(imdb_tv: dict | None, absolute_episode: Optional[int],
 # Main entry-point
 # =============================================================================
 
-async def metadata(filename: str, channel: int, msg_id, override_id: str = None) -> dict | None:
+async def metadata(
+    filename: str,
+    channel: int,
+    msg_id,
+    override_id: str = None,
+    split_info_override: SplitFileInfo | None = None,
+) -> dict | None:
     # Detect raw split videos and split ZIP archives before PTN parsing. PTN
     # only receives the clean original video filename, never `part001` or
     # `.zip.001`, so metadata matching stays identical to a normal upload.
-    split_info = detect_split_file(filename)
+    split_info = split_info_override or detect_split_file(filename)
     metadata_filename = split_info.media_filename if split_info else filename
     if split_info:
         LOGGER.info(

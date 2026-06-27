@@ -18,7 +18,7 @@ from Backend.helper.encrypt import decode_string, encode_string
 from Backend.helper.modal import Episode, MovieSchema, QualityDetail, QualityPart, Season, TVShowSchema
 from Backend.helper.task_manager import delete_message, delete_messages_batch
 from Backend.helper.subtitle_parser import normalize_title
-from Backend.helper.split_files import detect_split_file
+from Backend.helper.split_files import detect_legacy_bare_split_candidate, detect_split_file
 
 
 
@@ -810,6 +810,7 @@ class Database:
                 id=metadata_info['encoded_string'],
                 name=name,
                 size=size,
+                legacy_source_filename=metadata_info.get("legacy_source_filename"),
             )
 
         if metadata_info['media_type'] == "movie":
@@ -914,7 +915,12 @@ class Database:
             return False
         if existing.get("quality") != incoming.get("quality"):
             return False
-        existing_info = detect_split_file(str(existing.get("name") or ""))
+        existing_name = str(existing.get("name") or "")
+        legacy_source_name = str(existing.get("legacy_source_filename") or existing_name)
+        existing_info = (
+            detect_split_file(existing_name)
+            or detect_legacy_bare_split_candidate(legacy_source_name)
+        )
         incoming_name = incoming.get("media_filename") or incoming.get("name")
         if not existing_info or not incoming_name:
             return False
@@ -924,6 +930,58 @@ class Database:
             and cls._canonical_split_filename(existing_info.media_filename)
             == cls._canonical_split_filename(incoming_name)
         )
+
+    @staticmethod
+    def _size_text_to_bytes(value: object) -> int:
+        """Best-effort conversion for pre-split rows that stored only display size.
+
+        Current split rows preserve exact bytes.  Legacy normal rows did not,
+        so this is used only while migrating a validated `.001.mkv` sibling
+        into a virtual stream during a live upload.
+        """
+        match = re.match(r"^\s*([0-9]+(?:\.[0-9]+)?)\s*([KMGTPE]?B)?\s*$", str(value or ""), re.I)
+        if not match:
+            return 0
+        try:
+            amount = float(match.group(1))
+        except (TypeError, ValueError):
+            return 0
+        unit = (match.group(2) or "B").upper()
+        powers = {"B": 0, "KB": 1, "MB": 2, "GB": 3, "TB": 4, "PB": 5, "EB": 6}
+        return max(0, int(amount * (1024 ** powers.get(unit, 0))))
+
+    async def _legacy_normal_quality_part(self, quality: dict) -> Optional[dict]:
+        """Convert a safely matched old normal `.001.mkv` row into a part.
+
+        This is only called after `_is_legacy_split_fragment` confirms that
+        its clean filename matches the incoming contextual split group.
+        """
+        name = str(quality.get("name") or "")
+        source_name = str(quality.get("legacy_source_filename") or name)
+        info = detect_legacy_bare_split_candidate(source_name)
+        if not info:
+            return None
+        try:
+            payload = await decode_string(quality.get("id") or "")
+        except Exception as exc:
+            LOGGER.warning("[LegacySplit] Could not decode old normal row %s: %s", name or "unknown", exc)
+            return None
+        if not isinstance(payload, dict) or isinstance(payload.get("parts"), list):
+            return None
+        try:
+            chat_id = int(payload.get("chat_id"))
+            msg_id = int(payload.get("msg_id"))
+        except (TypeError, ValueError):
+            return None
+        if msg_id <= 0:
+            return None
+        return {
+            "part_number": info.part_number,
+            "chat_id": chat_id,
+            "msg_id": msg_id,
+            "size_bytes": self._size_text_to_bytes(quality.get("size")),
+        }
+
 
     async def _merge_split_part(self, qualities: List[dict], quality_to_update: dict) -> List[dict]:
         """Merge every member of one virtual split stream into a single row.
@@ -937,19 +995,29 @@ class Database:
             return qualities + [quality_to_update]
 
         matching: List[dict] = []
+        legacy_parts: List[dict] = []
         remaining: List[dict] = []
         for quality in qualities:
             if self._same_split_group(quality, quality_to_update):
                 matching.append(quality)
             elif self._is_legacy_split_fragment(quality, quality_to_update):
-                LOGGER.info(
-                    "[SplitMerge] Removed legacy single-part row: %s",
-                    quality.get("name") or "unknown",
-                )
+                legacy_part = await self._legacy_normal_quality_part(quality)
+                if legacy_part:
+                    legacy_parts.append(legacy_part)
+                    LOGGER.info(
+                        "[SplitMerge] Promoted legacy normal row into part %s: %s",
+                        legacy_part["part_number"],
+                        quality.get("name") or "unknown",
+                    )
+                else:
+                    # Do not drop media when a historic token cannot be
+                    # decoded. It stays as a normal fallback until a rescan.
+                    remaining.append(quality)
             else:
                 remaining.append(quality)
 
-        # Combine all previously-saved split records plus the new part.
+        # Combine all previously-saved split records, safely promoted legacy
+        # normal fragments, and the new incoming part.
         by_part_number: Dict[int, dict] = {}
         for quality in matching + [quality_to_update]:
             for part in quality.get("parts") or []:
@@ -959,6 +1027,8 @@ class Database:
                     continue
                 if part_number >= 0:
                     by_part_number[part_number] = part
+        for part in legacy_parts:
+            by_part_number[int(part["part_number"])] = part
 
         merged_parts = [by_part_number[number] for number in sorted(by_part_number)]
         if not merged_parts:
@@ -1124,6 +1194,11 @@ class Database:
                             continue
                         if part_number in incoming_part_numbers:
                             replaced_sources.append({"parts": [dict(old_part)]})
+                    retained.append(quality)
+                elif self._is_legacy_split_fragment(quality, quality_to_update):
+                    # Preserve the prior normal `.001.mkv` row so the merge
+                    # can promote its Telegram source into a real split part.
+                    # It must not be treated as an older replace-mode release.
                     retained.append(quality)
                 else:
                     replaced_sources.append(quality)
@@ -2505,6 +2580,36 @@ class Database:
                 result.append(doc)
             remaining -= len(docs)
         return result
+
+    async def refresh_subtitle_detection(
+        self,
+        *,
+        db_index: int,
+        subtitle_id: str,
+        detected: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        """Persist refreshed parser output without changing match status."""
+        if not ObjectId.is_valid(subtitle_id):
+            return None
+        storage = self.dbs.get(f"storage_{int(db_index)}")
+        if storage is None:
+            return None
+
+        from Backend.helper.subtitle_constants import language_name
+        from Backend.helper.subtitle_parser import normalize_language
+
+        language_code = normalize_language((detected or {}).get("language_code"))
+        result = await storage["subtitles"].find_one_and_update(
+            {"_id": ObjectId(subtitle_id)},
+            {"$set": {
+                "detected": detected or {},
+                "language_code": language_code,
+                "language_name": language_name(language_code),
+                "updated_at": datetime.utcnow(),
+            }},
+            return_document=ReturnDocument.AFTER,
+        )
+        return convert_objectid_to_str(result) if result else None
 
     async def set_subtitle_match(
         self,

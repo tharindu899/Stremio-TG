@@ -11,7 +11,14 @@ from pyrogram.types import Message
 from pyrogram.errors import FloodWait
 from pyrogram.enums.parse_mode import ParseMode
 from Backend.helper.metadata import extract_default_id
-from Backend.helper.split_files import detect_split_upload, strip_part_suffix, find_split_source, split_metadata_fields
+from Backend.helper.split_files import (
+    detect_split_upload,
+    strip_part_suffix,
+    find_split_source,
+    find_legacy_bare_split_source,
+    resolve_legacy_bare_split_candidates,
+    split_metadata_fields,
+)
 from Backend.helper.subtitle_service import index_subtitle, relink_unmatched_subtitles
 from Backend.helper.subtitle_constants import is_subtitle_file
 
@@ -44,6 +51,74 @@ def _split_source_info(message: Message):
 def _split_source_name(message: Message) -> str | None:
     source, _ = _split_source_info(message)
     return source
+
+
+# A normal live upload is handled one message at a time.  Legacy raw volumes
+# named `Movie.001.mkv` cannot be trusted from the filename alone, so look only
+# at recently posted sibling media before promoting the current upload.  The
+# scanner uses the same validation rule across its batches.
+_LEGACY_SPLIT_LIVE_LOOKBACK = 200
+
+
+def _legacy_bare_split_candidate(message: Message):
+    file = message.video or message.document
+    if file is None:
+        return None
+    message_id = int(getattr(message, "id", 0) or 0)
+    if message_id <= 0:
+        return None
+    filename = getattr(file, "file_name", "") or ""
+    caption = message.caption or ""
+    source, info = find_legacy_bare_split_source(
+        filename,
+        caption,
+        clean_filename(filename),
+        clean_filename(caption),
+    )
+    return (message_id, source, info) if source and info else None
+
+
+async def _contextual_legacy_split_for_live_upload(client: Client, message: Message):
+    """Return split metadata for the current legacy `.001.mkv` upload.
+
+    A new `.001` remains normal until a matching `.002` exists.  When `.002`
+    arrives, the preceding `.001` is found from the channel history and the
+    database converts that indexed normal row into a virtual-stream part.
+    This never accepts `.720.mkv`, `.1.mkv`, or any non-zero-padded suffix.
+    """
+    current = _legacy_bare_split_candidate(message)
+    if not current:
+        return None, None
+
+    message_id, source, _info = current
+    start = max(1, message_id - _LEGACY_SPLIT_LIVE_LOOKBACK)
+    candidates = []
+    try:
+        history = await client.get_messages(message.chat.id, list(range(start, message_id + 1)))
+        if not isinstance(history, list):
+            history = [history]
+        for sibling in history:
+            if sibling is None or getattr(sibling, "empty", False):
+                continue
+            candidate = _legacy_bare_split_candidate(sibling)
+            if candidate:
+                candidates.append((candidate[0], candidate[2]))
+    except FloodWait as exc:
+        LOGGER.info("[LegacySplit] Live context postponed by FloodWait %ss.", exc.value)
+        return None, None
+    except Exception as exc:
+        LOGGER.debug("[LegacySplit] Live context unavailable for msg %s: %s", message_id, exc)
+        return None, None
+
+    accepted = resolve_legacy_bare_split_candidates(candidates)
+    info = accepted.get(message_id)
+    if not info:
+        return None, None
+    LOGGER.info(
+        "[LegacySplit] Live upload msg %s accepted after consecutive sibling validation.",
+        message_id,
+    )
+    return source, info
 
 
 def _is_supported_media(message: Message) -> bool:
@@ -114,6 +189,9 @@ async def file_receive_handler(client: Client, message: Message):
                 file = message.video or message.document
                 title = message.caption or file.file_name
                 split_source, split_upload_info = _split_source_info(message)
+                legacy_candidate = _legacy_bare_split_candidate(message)
+                if not split_upload_info:
+                    split_source, split_upload_info = await _contextual_legacy_split_for_live_upload(client, message)
                 metadata_source = split_source or title
                 msg_id = message.id
                 raw_size = file.file_size or 0
@@ -125,6 +203,8 @@ async def file_receive_handler(client: Client, message: Message):
                 if metadata_info is None:
                     LOGGER.warning(f"Metadata failed for file: {title} (ID: {msg_id})")
                     return
+                if legacy_candidate and not split_upload_info:
+                    metadata_info["legacy_source_filename"] = legacy_candidate[1]
 
                 title = remove_urls(metadata_source if metadata_info.get('group_key') else title)
                 if not metadata_info.get('group_key'):
@@ -177,6 +257,9 @@ async def file_edited_handler(client: Client, message: Message):
                 file = message.video or message.document
                 title = message.caption or file.file_name
                 split_source, split_upload_info = _split_source_info(message)
+                legacy_candidate = _legacy_bare_split_candidate(message)
+                if not split_upload_info:
+                    split_source, split_upload_info = await _contextual_legacy_split_for_live_upload(client, message)
                 metadata_source = split_source or title
                 msg_id = message.id
                 raw_size = file.file_size or 0
@@ -195,6 +278,8 @@ async def file_edited_handler(client: Client, message: Message):
                     if metadata_info is None:
                         LOGGER.warning(f"Metadata failed for edited file: {title} (ID: {msg_id})")
                         return
+                    if legacy_candidate and not split_upload_info:
+                        metadata_info["legacy_source_filename"] = legacy_candidate[1]
 
                     title = remove_urls(metadata_source if metadata_info.get('group_key') else title)
                     if not metadata_info.get('group_key'):

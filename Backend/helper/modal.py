@@ -22,6 +22,10 @@ class QualityDetail(BaseModel):
     # raw = direct concatenated video parts; zip = split ZIP archive volumes.
     split_kind: Optional[str] = None
     media_filename: Optional[str] = None
+    # Original raw name for a temporarily normal legacy `.001.mkv` upload.
+    # It lets a later validated `.002` promote the earlier row safely even
+    # when its user-facing caption differs from the Telegram filename.
+    legacy_source_filename: Optional[str] = None
 
 
 # ---------------------------
