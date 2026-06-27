@@ -1,306 +1,177 @@
 ---
-title: TharinduHub • Stremio-TG
+title: TharinduHub Stremio-TG
 emoji: 🎬
 colorFrom: blue
 colorTo: purple
 sdk: docker
 app_port: 7860
-short_description: TharinduHub Telegram streaming with smart subtitles
+short_description: Telegram media streaming for Stremio and Nuvio
 ---
 
 <p align="center">
-  <img src="assets/tharinduhub-stremio-banner.svg" alt="TharinduHub · Stremio-TG" width="480" />
+  <img src="assets/tharinduhub-stremio-banner.svg" alt="TharinduHub • Stremio-TG" width="420" />
 </p>
 
 <h1 align="center">🎬 TharinduHub • Stremio-TG</h1>
 
 <p align="center">
-  <strong>⚡ Your private Telegram media library for Stremio &amp; Nuvio</strong><br />
-  Upload to Telegram • Index with smart metadata • Stream with personal add-on links • Manage everything from one beautiful dashboard
+  <strong>Private Telegram media library for Stremio &amp; Nuvio</strong><br/>
+  Upload to Telegram · Match smart metadata · Stream with personal add-on links
 </p>
 
 <p align="center">
-  <a href="#quick-start"><strong>🚀 Quick Start</strong></a> ·
-  <a href="#deploy-with-docker-compose"><strong>🐳 Docker</strong></a> ·
-  <a href="#deploy-on-hugging-face-spaces"><strong>🤗 Hugging Face</strong></a> ·
-  <a href="#subtitle-system"><strong>💬 Subtitles</strong></a> ·
-  <a href="#troubleshooting"><strong>🩺 Help</strong></a>
+  <a href="#quick-start">🚀 Quick Start</a> ·
+  <a href="#hugging-face-spaces">🤗 Hugging Face</a> ·
+  <a href="#subtitles">💬 Subtitles</a> ·
+  <a href="#troubleshooting">🩺 Help</a>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white" alt="Python 3.11+" />
   <img src="https://img.shields.io/badge/FastAPI-Web%20API-009688?logo=fastapi&logoColor=white" alt="FastAPI" />
-  <img src="https://img.shields.io/badge/MongoDB-Storage-47A248?logo=mongodb&logoColor=white" alt="MongoDB" />
+  <img src="https://img.shields.io/badge/MongoDB-Metadata-47A248?logo=mongodb&logoColor=white" alt="MongoDB" />
   <img src="https://img.shields.io/badge/Telegram-Media%20source-26A5E4?logo=telegram&logoColor=white" alt="Telegram" />
   <img src="https://img.shields.io/badge/Stremio-Add--on-8D3DAF?logo=stremio&logoColor=white" alt="Stremio" />
   <img src="https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white" alt="Docker" />
-  <img src="https://img.shields.io/badge/License-GPL--3.0-blue" alt="GPL-3.0" />
 </p>
 
-<p align="center">
-  <strong>🌟 Brand:</strong> <a href="https://t.me/TharinduHub">TharinduHub</a>
-</p>
-
-<details>
-<summary><strong>✨ Tap to view library highlights</strong></summary>
-
-<br />
-
-<table align="center">
-  <tr>
-    <td align="center"><strong>📚 Telegram Storage</strong><br /><sub>Keep your library in channels</sub></td>
-    <td align="center"><strong>⚡ Direct Streaming</strong><br /><sub>Fast Stremio &amp; Nuvio playback</sub></td>
-  </tr>
-  <tr>
-    <td align="center"><strong>💬 Smart Subtitles</strong><br /><sub>Auto-match + Sinhala fallback</sub></td>
-    <td align="center"><strong>🖥️ Web Dashboard</strong><br /><sub>Manage from any device</sub></td>
-  </tr>
-</table>
-
-</details>
-
-> 📱 **Mobile layout:** tables are kept as normal GitHub tables, but placed inside **tap-to-open panels**. Open only the table you need.
->
-> 💡 **TharinduHub private-library design:** your media stays in Telegram, while MongoDB stores only the metadata and stream references.
+> 💡 **Mobile-first README:** short headings, normal bullet lists, no wide tables, and no unnecessary hidden panels.
 
 ---
 
-<a id="quick-start"></a>
-## 🚀 Quick Start
+## ✨ What it does
 
-1. 🤖 Create a Telegram bot with **@BotFather** and add it as an admin in your media channel.
-2. 🗄️ Create two MongoDB databases: one for **tracking** and one for **storage**.
-3. 🧩 Fill the required values in `config.env` or your hosting platform secrets.
-4. 🐳 Deploy with Docker, 🤗 Hugging Face Spaces, or a VPS.
-5. 🖥️ Open the dashboard, configure your **Base URL**, **TMDb key**, and **Auth channels**.
-6. 📺 Create a personal token and install the manifest in **Stremio** or **Nuvio**.
+- 📥 Indexes movies, TV episodes, subtitles, and supported split uploads from Telegram channels.
+- 🧠 Matches titles through TMDb/Cinemeta-compatible metadata lookup and filename hints.
+- 🗄️ Saves lightweight media references, catalog data, settings, tokens, and subtitle links in MongoDB.
+- ⚙️ Serves catalog, metadata, stream, and subtitle endpoints through FastAPI.
+- 📺 Lets each user install a private add-on URL in Stremio or Nuvio.
+- 🖥️ Includes a web dashboard for media, subtitles, scans, tokens, catalogs, access, and settings.
+- 🇱🇰 Uses Sinhala as the subtitle language only when no supported language can be detected.
 
-> ⚠️ **Before sharing access:** change the default dashboard login and never publish your bot token, MongoDB URI, or `USER_SESSION_STRING`.
-
----
-
-<a id="contents"></a>
-## 🧭 Quick Navigation
-
-<details>
-<summary><strong>🧭 Tap to open full navigation table</strong></summary>
-
-| 🚀 Start Here | ⚙️ Setup & Deploy | 🎬 Library & Playback |
-|---|---|---|
-| [🎬 What Stremio-TG Does](#what-stremio-tg-does) | [🧰 Requirements](#requirements) | [📤 Upload & Naming Guide](#upload-and-naming-guide) |
-| [✨ Feature Overview](#feature-overview) | [🔗 Telegram & MongoDB](#telegram-and-mongodb-preparation) | [💬 Subtitle System](#subtitle-system) |
-| [⚙️ How It Works](#how-the-system-works) | [🧩 Initial Configuration](#initial-configuration) | [🧩 Split Files](#split-files-and-archive-volumes) |
-| [🖥️ Dashboard Setup](#first-run-dashboard-setup) | [🐳 Docker Compose](#deploy-with-docker-compose) | [🔍 Scans & Catalogs](#scanning-matching-and-catalog-tools) |
-| [📺 Add Stremio / Nuvio](#add-stremio-or-nuvio) | [🤗 Hugging Face Spaces](#deploy-on-hugging-face-spaces) | [🔐 Tokens & Subscriptions](#access-tokens-and-subscriptions) |
-| [🤖 Bot Commands](#bot-commands) | [🛡️ VPS + HTTPS](#deploy-on-a-vps-with-https) | [🌐 Global Search](#global-search) |
-
-</details>
-
-<details>
-<summary><strong>🧭 Tap to open management & security links</strong></summary>
-
-| 🧭 Manage & Maintain | 🔒 Keep It Safe |
-|---|---|
-| [🖥️ Dashboard Pages](#dashboard-pages) · [🩺 Troubleshooting](#troubleshooting) · [🔄 Updating Safely](#updating-safely) | [🔒 Security Checklist](#security-checklist) · [🗂️ Project Layout](#project-layout) · [🙏 Credits](#credits) · [📜 License](#license) |
-
-</details>
-
----
-
-<a id="what-stremio-tg-does"></a>
-## 🎬 What Stremio-TG Does
-
-Stremio-TG turns Telegram channels into a private media library.
-
-1. You add the bot as an administrator in one or more media channels.
-2. The server indexes video files, subtitle documents, and supported multipart uploads.
-3. It resolves movie or TV metadata through the configured metadata provider.
-4. It stores stream references in MongoDB rather than downloading the media to your server.
-5. Stremio or Nuvio uses your personal add-on URL to browse, stream, and load linked subtitles.
-
-### 🪄 Media Flow — From Upload to Playback
+### 🪄 Media flow
 
 ```mermaid
 flowchart TB
-    TG["📥 Telegram Channel<br/>Movies · TV · Subtitles · Split files"]
-    BOT["🤖 Stremio-TG Bot & Scanner<br/>Detect · Parse · Match · Index"]
-    DB[("🗄️ MongoDB<br/>Metadata · Subtitle links · Stream references")]
-    API["⚙️ FastAPI Add-on<br/>Catalog · Meta · Stream · Subtitle endpoints"]
-    APP["📺 Stremio / Nuvio<br/>Browse · Select · Stream · Play"]
+    A[📥 Telegram channel\nMedia · subtitles · split files]
+    B[🤖 Stremio-TG bot + scanner\nDetect · parse · match · index]
+    C[(🗄️ MongoDB\nMetadata · stream refs · subtitle links)]
+    D[⚙️ FastAPI add-on\nCatalog · meta · streams · subtitles]
+    E[📺 Stremio / Nuvio\nBrowse · choose · play]
 
-    TG -->|"📤 Forward or upload"| BOT
-    BOT -->|"🔎 Scan & save"| DB
-    DB <-->|"🔄 Read & update"| API
-    API -->|"🔗 Personal manifest URL"| APP
-
-    classDef telegram fill:#229ED9,stroke:#168AC0,color:#ffffff,stroke-width:2px;
-    classDef bot fill:#6A5ACD,stroke:#5143AF,color:#ffffff,stroke-width:2px;
-    classDef database fill:#47A248,stroke:#357D37,color:#ffffff,stroke-width:2px;
-    classDef api fill:#009688,stroke:#007A6F,color:#ffffff,stroke-width:2px;
-    classDef player fill:#7D3C98,stroke:#642F7A,color:#ffffff,stroke-width:2px;
-
-    class TG telegram;
-    class BOT bot;
-    class DB database;
-    class API api;
-    class APP player;
+    A --> B --> C
+    C <--> D
+    D --> E
 ```
 
-<p align="center">
-  <sub>📌 Your media stays in Telegram · 🗄️ MongoDB keeps lightweight references · ⚡ FastAPI delivers playback links to your media app</sub>
-</p>
-
-> 💡 **No local media copy required:** the server indexes and streams your Telegram media. It does not download your full library to the host server.
-
-> ⚖️ **Use responsibly:** Stremio-TG is intended for media you are authorized to store and access. Keep Telegram channels, database credentials, bot tokens, and add-on tokens private.
+> 🔒 Your media stays in Telegram. The server stores metadata and Telegram stream references; it does not make a full local copy of your library.
 
 ---
 
-<a id="feature-overview"></a>
-## ✨ Feature Overview
+## 🚀 Quick Start
 
-### 📚 Telegram Media Library
+1. 🤖 Create a bot with **@BotFather** and add it as an admin in your Telegram media channel.
+2. 🔑 Get `API_ID` and `API_HASH` from `my.telegram.org`.
+3. 🗄️ Create two MongoDB database names: `dbStremio` and `storage_1` are recommended.
+4. 🧩 Add the required startup values in `config.env`, Docker environment variables, or Hugging Face Secrets.
+5. 🐳 Deploy with Docker Compose, a VPS, or Hugging Face Spaces.
+6. 🖥️ Sign in to the dashboard and set the Base URL, TMDb key, and Auth channels.
+7. 📺 Create an access token and install its personal manifest URL in Stremio or Nuvio.
 
-- 📚 Index movies and TV episodes from one or more Telegram channels.
-- 📚 Keep stream references in MongoDB; no local media disk is required.
-- 📚 Support normal video uploads and compatible document uploads.
-- 📚 Show compact stream labels such as `[Stremio-TG] • 2160p WEB-DL`.
-- 📚 Replace an existing stream when a newer file has the same title, episode, and quality while **Replace Mode** is enabled.
-- 📚 Detect common split uploads and expose them as one virtual stream instead of separate parts.
-- 📚 Run dead-link checks and remove or repair unavailable source messages from the library.
-
-### 🧠 Metadata, Catalogs & Search
-
-- 🧠 Resolve movies and series through TMDb/Cinemeta-compatible metadata matching.
-- 🧠 Match noisy filenames with year, quality, season, and episode hints.
-- 🧠 Manually correct a wrong title from the media editor or with an IMDb/TMDb URL.
-- 🧠 Create custom catalogs, manage catalog content, and use automatic catalog synchronization.
-- 🧠 Browse latest and popular content through the Stremio add-on.
-- 🧠 Optional Telegram **Global Search** using a personal user-session client and selected channels.
-
-### 💬 Subtitle Library
-
-- 💬 Index `.srt`, `.vtt`, `.ass`, `.ssa`, `.sub`, `.smi`, and `.sami` subtitle files.
-- 💬 Detect movie and episode subtitles from filename, caption, explicit IDs, season/episode markers, year, and metadata aliases.
-- 💬 Support title aliases such as romanized, localized, and English metadata names.
-- 💬 Keep explicit subtitle languages correct, including Sinhala, English, Japanese, Arabic, Tamil, Hindi, Malayalam, Telugu, and more.
-- 💬 Use **Sinhala (`si`) as the default only when no supported language can be detected** in the filename or caption.
-- 💬 Provide a subtitle page with filters, search, pagination, edit, delete, manual matching, and **Match unmatched** relinking.
-- 💬 Return linked subtitles to Stremio for every quality of the same movie or episode.
-
-### 🖥️ Web Dashboard
-
-- 🖥️ Mobile-friendly dashboard with light and dark themes.
-- 🖥️ Media management for movies and series.
-- 🖥️ Subtitle management with status and language filters.
-- 🖥️ Catalog editor and auto-sync controls.
-- 🖥️ Scan tools for media-only, subtitle-only, and full channel scans.
-- 🖥️ Access-token management, stream analytics, dead-link tools, system statistics, and settings.
-- 🖥️ PWA assets for an installable dashboard experience.
-
-### 🔐 Access & Subscriptions
-
-- 🔐 Personal Stremio add-on tokens.
-- 🔐 Optional user subscription plans, payment proof flow, approver actions, access expiry, and channel membership checks.
-- 🔐 Add or revoke access from the dashboard.
-- 🔐 Optional stream data limits per token.
-- 🔐 Extra storage databases and additional bot clients can be added from runtime settings.
+> ⚠️ Change the initial dashboard login immediately. Never share a bot token, MongoDB URI, add-on token, or `USER_SESSION_STRING`.
 
 ---
 
-<a id="how-the-system-works"></a>
+## 🧭 Guide
+
+- 🎬 [How the system works](#how-the-system-works)
+- 🔑 [Telegram and MongoDB preparation](#telegram-and-mongodb-preparation)
+- 🧩 [Initial configuration](#initial-configuration)
+- 🐳 [Docker Compose deployment](#docker-compose)
+- 🤗 [Hugging Face Spaces deployment](#hugging-face-spaces)
+- 🛡️ [VPS and HTTPS](#vps-and-https)
+- 🖥️ [First dashboard setup](#first-dashboard-setup)
+- 📺 [Install in Stremio or Nuvio](#install-in-stremio-or-nuvio)
+- 📤 [Upload and naming guide](#upload-and-naming-guide)
+- 💬 [Subtitle system](#subtitles)
+- 🧩 [Split files](#split-files)
+- 🔍 [Scans and catalogs](#scans-and-catalogs)
+- 🔐 [Tokens and subscriptions](#tokens-and-subscriptions)
+- 🌐 [Global Search](#global-search)
+- 🩺 [Troubleshooting](#troubleshooting)
+- 🔒 [Security checklist](#security-checklist)
+- 💙 [Credits](#credits)
+
+---
+
 ## ⚙️ How the System Works
 
-### 🗄️ Data Storage Roles
+### 🗄️ Database roles
 
-The required `DATABASE` value contains two comma-separated MongoDB URIs:
+`DATABASE` must contain **two comma-separated MongoDB URIs** on first setup:
 
-<details>
-<summary><strong>🗄️ Tap to view database roles</strong></summary>
+- **First URI** — tracking database: app settings, tokens, subscriptions, scan state, subtitle index, and dashboard data.
+- **Second URI** — `storage_1`: indexed movie and TV stream records.
 
-| Database position | Purpose |
-|---|---|
-| First URI | Tracking database: app settings, tokens, subscriptions, scan state, subtitle index, and administrative data. |
-| Second URI | `storage_1`: movie and TV stream records. |
+You can add extra storage databases later from **Admin → Settings**. Keep the first two URIs in their original order.
 
-</details>
+### 🎛️ Runtime settings
 
-Additional storage databases can be added later from **Admin → Settings**. The first two URIs remain the required tracking and initial storage databases.
+Only startup credentials are needed before the first boot. After the first successful start, the dashboard saves runtime settings in the tracking database.
 
-### 🎛️ Runtime Settings
+Set these from **Admin → Settings**:
 
-> 💡 **Good to know:** only the startup credentials are required before the first run. On the first successful boot, the remaining runtime settings are seeded into the tracking database.
+- 🗂️ Auth channels
+- 🎬 TMDb API key
+- 🌐 Base URL
+- 🔁 Replace Mode and catalog visibility
+- 🔐 Dashboard login
+- 🌍 Proxy and Global Search settings
+- 💳 Subscription settings
+- 🤖 Extra bot clients and storage databases
 
-After that, use the dashboard for runtime settings such as channels, TMDb API key, base URL, catalog behavior, proxy, subscriptions, and additional bot tokens. Editing legacy runtime values in `config.env` after first boot does not overwrite the settings already stored in MongoDB.
-
----
-
-<a id="requirements"></a>
-## 🧰 Requirements
-
-Before deployment, prepare:
-
-- 🧰 A Telegram bot token from **@BotFather**.
-- 🧰 Telegram `API_ID` and `API_HASH` from `my.telegram.org`.
-- 🧰 Your numeric Telegram user ID for `OWNER_ID`.
-- 🧰 A MongoDB deployment reachable by the server. MongoDB Atlas M0 is suitable for a small personal library.
-- 🧰 At least one Telegram channel where the bot is an administrator.
-- 🧰 A public HTTPS URL for reliable Stremio/Nuvio playback. A Hugging Face Space URL or VPS domain is suitable.
-- 🧰 A TMDb API key for accurate automated metadata and catalog operations.
-
-Optional:
-
-- 🧰 A `USER_SESSION_STRING` for Global Search.
-- 🧰 Extra bot tokens for more streaming clients.
-- 🧰 A subscription group, approver IDs, payment instructions, and payment QR image URL for paid/private access.
+> 📌 Changing runtime values in `config.env` later does not override values already saved in MongoDB.
 
 ---
 
-<a id="telegram-and-mongodb-preparation"></a>
-## 🔗 Telegram & MongoDB Preparation
+## 🔗 Telegram and MongoDB Preparation
 
-### 🤖 1. Create the Telegram Bot
+### 🤖 Create the Telegram bot
 
-1. Open **@BotFather** in Telegram.
+1. Open **@BotFather**.
 2. Send `/newbot` and complete the prompts.
-3. Copy the generated token into `BOT_TOKEN`.
-4. Add the bot as an **administrator** in every channel it must index or stream from.
+3. Copy the token into `BOT_TOKEN`.
+4. Add the bot as an **administrator** in every indexed channel.
 
-The bot needs enough channel permissions to read the media messages it indexes. For private channels, use the numeric channel ID if a public `@username` is unavailable.
+For a private channel without a public username, use its numeric `-100…` channel ID in the dashboard.
 
-### 🔑 2. Get `API_ID` & `API_HASH`
+### 🔑 Get Telegram API values
 
 1. Open `https://my.telegram.org`.
-2. Sign in with your Telegram phone number.
-3. Open **API development tools**.
-4. Create an application.
-5. Copy **api_id** and **api_hash**.
+2. Sign in and open **API development tools**.
+3. Create an application.
+4. Copy the `api_id` and `api_hash` values.
 
-### 👤 3. Get Your `OWNER_ID`
+### 👤 Get your Owner ID
 
-Use a Telegram ID bot such as **@userinfobot**, then copy your numeric user ID. The owner can use protected bot commands such as `/set`, `/stats`, `/log`, and `/restart`.
+Use **@userinfobot** or another trusted Telegram ID bot. Put your numeric account ID in `OWNER_ID`.
 
-### 🗄️ 4. Create MongoDB Databases
+### 🗄️ Prepare MongoDB
 
-You need two database names. They may live in the same MongoDB cluster.
-
-Example layout:
+You can use one MongoDB Atlas cluster with two different database names.
 
 ```text
 mongodb+srv://USER:PASSWORD@cluster.example.mongodb.net/dbStremio
 mongodb+srv://USER:PASSWORD@cluster.example.mongodb.net/storage_1
 ```
 
-In MongoDB Atlas:
-
-1. Create a database user.
-2. Add the server IP to Network Access. For hosted platforms with changing outbound addresses, `0.0.0.0/0` is commonly used, but restrict it whenever your deployment allows it.
-3. Copy the Driver connection string.
-4. Use URL-encoded credentials when the password contains special characters such as `@`, `:`, `/`, or `#`.
+- Create a database user with a strong password.
+- Add the host network access rule required by your deployment platform.
+- URL-encode password characters such as `@`, `:`, `/`, and `#`.
+- Keep the complete connection strings private.
 
 ---
 
-<a id="initial-configuration"></a>
 ## 🧩 Initial Configuration
 
 Copy the sample file:
@@ -309,1009 +180,607 @@ Copy the sample file:
 cp sample_config.env config.env
 ```
 
-Fill only the startup values:
+Add only the startup values:
 
 ```env
-# Telegram
 API_ID="1234567"
 API_HASH="your_telegram_api_hash"
 BOT_TOKEN="1234567890:your_bot_token"
 USER_SESSION_STRING=""
 OWNER_ID="123456789"
-
-# Database: exactly two URIs on first setup
 DATABASE="mongodb+srv://USER:PASSWORD@cluster.example.mongodb.net/dbStremio,mongodb+srv://USER:PASSWORD@cluster.example.mongodb.net/storage_1"
-
-# Server
 PORT="8000"
 ```
 
-### 📌 Required Startup Variables
+### 📌 Startup variables
 
-<details>
-<summary><strong>🧩 Tap to view startup configuration variables</strong></summary>
+- `API_ID` — **required** Telegram application API ID.
+- `API_HASH` — **required** Telegram application API hash.
+- `BOT_TOKEN` — **required** main Telegram bot token.
+- `OWNER_ID` — **required** numeric Telegram owner ID.
+- `DATABASE` — **required** two comma-separated MongoDB URIs: tracking first, `storage_1` second.
+- `PORT` — **required** web server port. Use `8000` for Docker/VPS and `7860` for Hugging Face Spaces.
+- `USER_SESSION_STRING` — **optional**; required only for Global Search. Treat it like a password.
 
-| Variable | Required | Description |
-|---|:---:|---|
-| `API_ID` | Yes | Telegram application API ID. |
-| `API_HASH` | Yes | Telegram application API hash. |
-| `BOT_TOKEN` | Yes | Main Telegram bot token. |
-| `OWNER_ID` | Yes | Numeric Telegram account ID for administrator-only bot commands. |
-| `DATABASE` | Yes | Two comma-separated MongoDB connection URIs: tracking first, `storage_1` second. |
-| `PORT` | Yes | Web server port. Use `7860` for Hugging Face Docker Spaces. |
-| `USER_SESSION_STRING` | Optional | Required only for Global Search. Treat it like a password. |
+### ⚠️ Important rules
 
-</details>
-
-### ⚠️ Important Configuration Rules
-
-- ⚠️ Never publish `config.env`, session strings, MongoDB passwords, or bot tokens.
-- ⚠️ Add `config.env` to `.gitignore`.
-- ⚠️ Do not put your real secrets in `sample_config.env`.
-- ⚠️ After the first start, configure the base URL, channels, TMDb key, and other runtime options from the dashboard.
-- ⚠️ Change the default web login immediately after first sign-in.
+- Never commit `config.env` or real secrets.
+- Do not put secrets in `sample_config.env`.
+- Change the default dashboard login at first sign-in.
+- Set Base URL, channels, TMDb, and other runtime settings from the dashboard after boot.
 
 ---
 
-<a id="deploy-with-docker-compose"></a>
-## 🐳 Deploy with Docker Compose
+## 🐳 Docker Compose
 
-Docker Compose is the simplest VPS deployment method.
+### 📦 Deploy
 
 ```bash
-git clone https://github.com/your-account/your-repository.git
-cd your-repository
+git clone https://github.com/YOUR-USERNAME/YOUR-REPOSITORY.git
+cd YOUR-REPOSITORY
 cp sample_config.env config.env
 nano config.env
-```
-
-Start the application:
-
-```bash
 docker compose up -d --build
 ```
 
-Useful commands:
-
-```bash
-# Follow application logs
-docker compose logs -f
-
-# Check running containers
-docker compose ps
-
-# Restart after changing startup-only configuration
-docker compose restart
-
-# Pull code changes and rebuild
-git pull
-docker compose up -d --build
-```
-
-The default Compose mapping is `8000:8000`. Open:
+Open the dashboard:
 
 ```text
 http://YOUR_SERVER_IP:8000
 ```
 
-> 🔒 **HTTPS required for best playback:** place the app behind HTTPS before using the URL as your final Stremio/Nuvio Base URL.
+### 🛠️ Useful commands
+
+```bash
+# Follow logs
+docker compose logs -f
+
+# Check service state
+docker compose ps
+
+# Restart after startup configuration changes
+docker compose restart
+
+# Update code and rebuild
+git pull
+docker compose up -d --build
+```
+
+> 🔒 Put the app behind HTTPS before using its address as the final Base URL for Stremio or Nuvio.
 
 ---
 
-<a id="deploy-on-hugging-face-spaces"></a>
-## 🤗 Deploy on Hugging Face Spaces
+## 🤗 Hugging Face Spaces
 
-> 🌐 **Best for an easy public deployment:** Hugging Face Spaces builds this project as a Docker application and gives it a secure HTTPS address automatically. Your media and app data remain in Telegram and MongoDB; the Space only runs the bot, dashboard, and streaming API.
+> ✅ This project deploys as a **Docker Space**. Hugging Face reads the YAML card at the top of this `README.md`, builds the root `Dockerfile`, and exposes the configured `app_port`.
 
-### 🗺️ Hugging Face Deployment Map
+### 1. Create the Space
 
-```text
-🧑‍💻 Your GitHub / local project
-          │
-          ├── 📦 Upload project files to a Docker Space
-          ├── 🔐 Add Telegram + MongoDB values as Space Secrets
-          └── ▶️ Space builds and starts on port 7860
-                         │
-                         ▼
-         🌐 https://YOUR-USERNAME-YOUR-SPACE.hf.space
-                         │
-                         ├── 🖥️ Dashboard settings
-                         ├── 🤖 Telegram indexing and streaming
-                         └── 📺 Stremio / Nuvio personal manifest URLs
-```
+1. Open **Hugging Face → New Space**.
+2. Choose your account and a Space name such as `stremio-tg`.
+3. Select **Docker** as the SDK.
+4. Use a public Space when external Stremio/Nuvio clients need to access the add-on URL.
+5. Create the Space.
 
-### ✅ Before You Start
+> 📌 Availability depends on your selected hardware and sleep settings. Choose settings that match the uptime you need for bot activity and playback.
 
-Prepare these first:
-
-<details>
-<summary><strong>🤗 Tap to view Hugging Face requirements</strong></summary>
-
-| You need | Why it is needed |
-|---|---|
-| 🤗 Hugging Face account | Creates and hosts the Docker Space. |
-| 🤖 Telegram bot token | Connects the main bot. |
-| 🔑 Telegram API ID + API hash | Connects the Telegram streaming client. |
-| 👤 Owner ID | Restricts owner-only bot actions. |
-| 🗄️ Two MongoDB URIs | Preserves media index, settings, subtitles, tokens, and catalog data outside the Space. |
-| 🎬 TMDb API key | Added after first boot from the dashboard for better metadata matching. |
-| 📁 This full project folder | Must include `Dockerfile`, `start.sh`, `Backend/`, `pyproject.toml`, `uv.lock`, assets, and the Space `README.md`. |
-
-</details>
-
-> 🚫 **Do not upload `config.env` to a Space.** Keep all secrets in Hugging Face **Secrets**. The project reads them as normal environment variables during startup.
-
-### 🧱 1. Confirm the Space Card Metadata
-
-Hugging Face reads the YAML block at the very top of the repository `README.md`. Keep this block at the top when you replace the README:
+### 2. Keep this README card at the top
 
 ```yaml
 ---
-title: TharinduHub Stremio
+title: TharinduHub Stremio-TG
 emoji: 🎬
 colorFrom: blue
 colorTo: purple
 sdk: docker
 app_port: 7860
-short_description: Telegram Stremio streaming with subtitle manager
+short_description: Telegram media streaming for Stremio and Nuvio
 ---
 ```
 
-<details>
-<summary><strong>🪪 Tap to view Hugging Face Space card fields</strong></summary>
+- `sdk: docker` — tells Hugging Face to build the project Dockerfile.
+- `app_port: 7860` — makes the app available at the Space URL.
+- `title`, `emoji`, and colors — control the Space card appearance.
 
-| Field | Required value | Why it matters |
-|---|---|---|
-| `sdk` | `docker` | Tells Hugging Face to build the project with its `Dockerfile`. |
-| `app_port` | `7860` | Makes the FastAPI service reachable through the Space URL. |
-| `title` / `emoji` / colors | Your preferred branding | Controls the Space card appearance. |
-| `short_description` | Short public summary | Appears in the Space listing. |
+### 3. Upload the project
 
-</details>
+**Browser method**
 
-> ✅ This project already uses `PORT` from the environment. On Hugging Face, set `PORT=7860` so it matches `app_port: 7860`.
+1. Extract the project ZIP.
+2. Open the Space → **Files and versions**.
+3. Choose **Add file → Upload files**.
+4. Upload the full project while keeping folders intact.
+5. Commit the files and watch the build logs.
 
-### 🆕 2. Create the Docker Space
+Upload these project items:
 
-1. Open **Hugging Face → New Space**.
-2. Select your account or organization as the owner.
-3. Choose a clear Space name, for example `stremio-tg`.
-4. Select **Docker** as the SDK.
-5. Select **Public** when Stremio or Nuvio users must access the Space directly.
-6. Choose the available CPU hardware for testing, then create the Space.
+- `Backend/`
+- `assets/`
+- `Dockerfile`
+- `start.sh`
+- `pyproject.toml`
+- `uv.lock`
+- `requirements.txt`
+- `sample_config.env`
+- `README.md`
 
-> ⚠️ **Public is normally required for Stremio/Nuvio:** external add-on clients need to reach the direct `.hf.space` URL. Protect access through the app’s dashboard password, individual add-on tokens, subscriptions, and private Telegram channels—not by exposing credentials in a public repository.
+Do **not** upload:
 
-> 💤 **Sleep behaviour:** free Hugging Face hardware may sleep after inactivity. While asleep, live indexing, background checks, and playback will not run until the Space wakes. Use an always-running paid hardware option when you need uninterrupted bot and streaming availability.
+- `config.env`
+- `.env`
+- `*.session`
+- Logs, backups, `__pycache__`, or credentials
 
-### 📤 3. Upload the Project — Browser Method
-
-This is the simplest method on a phone or without Git.
-
-1. 📦 Extract the project ZIP on your device or computer.
-2. 🤗 Open your new Space → **Files and versions**.
-3. ➕ Choose **Add file → Upload files**.
-4. 📁 Upload the extracted project contents, preserving all folders:
-
-```text
-Backend/
-assets/
-Dockerfile
-start.sh
-pyproject.toml
-uv.lock
-requirements.txt
-sample_config.env
-docker-compose.yaml
-README.md
-```
-
-5. 📝 Ensure the file is named exactly `README.md` in the Space root.
-6. 🚫 Do **not** upload `.env`, `config.env`, `*.session`, `__pycache__`, logs, or private backup files.
-7. 💾 Commit the upload from the browser. Hugging Face starts the Docker build automatically.
-
-> 🔎 **Build check:** open **Logs** and wait for the Space status to become **Running**. The application log should show that the web server is listening on `0.0.0.0:7860` and that Telegram-Stremio started successfully.
-
-### 🧑‍💻 4. Upload or Update — Git Method
-
-Use this method for cleaner updates from a computer.
-
-#### 🔐 Authenticate once
-
-1. Create a Hugging Face **Write** access token from your account settings.
-2. Install the Hugging Face CLI and sign in:
-
-```bash
-pip install -U "huggingface_hub[cli]"
-hf auth login
-```
-
-3. Paste the Write token when requested. Never commit the token into a repository or paste it into the remote URL.
-
-#### 🚀 Push the project
-
-Run these commands inside the project folder:
+**Git method**
 
 ```bash
 git init
 git branch -M main
 git add -A
-git commit -m "Deploy Stremio-TG to Hugging Face"
-git remote add origin https://huggingface.co/spaces/YOUR_HF_USERNAME/YOUR_SPACE_NAME
+git commit -m "Deploy Stremio-TG"
+git remote add origin https://huggingface.co/spaces/YOUR-USERNAME/YOUR-SPACE.git
 git push -u origin main
 ```
 
-For future updates:
+### 4. Add Secrets and Variable
 
-```bash
-git add -A
-git commit -m "Update Stremio-TG"
-git push
-```
+Open **Space → Settings → Variables and secrets**.
 
-> 🛡️ **Authentication error?** Run `hf auth login` again with a new Write token, then retry `git push`. A Hugging Face access token is used as the Git password; your normal Hugging Face account password is not used for Git pushes.
+Add these as **Secrets**:
 
-### 🔐 5. Add Hugging Face Secrets and Variables
+- `API_ID` — Telegram API ID.
+- `API_HASH` — Telegram API hash.
+- `BOT_TOKEN` — main bot token.
+- `OWNER_ID` — numeric Telegram owner ID.
+- `DATABASE` — both MongoDB URIs in one comma-separated value.
+- `USER_SESSION_STRING` — only when using Global Search.
 
-Open your Space → **Settings → Variables and secrets**.
+Add this as a normal **Variable**:
 
-#### 🔒 Add these as Secrets
+- `PORT` — `7860`
 
-<details>
-<summary><strong>🔐 Tap to view Hugging Face Secrets</strong></summary>
+> 🔄 Updating a Space secret, variable, or hardware setting restarts the Space. Secrets are the correct place for credentials; variables are for non-sensitive settings.
 
-| Secret name | Example / format | Required | Notes |
-|---|---|:---:|---|
-| `API_ID` | `12345678` | ✅ | Telegram API numeric ID from `my.telegram.org`. |
-| `API_HASH` | `abc123...` | ✅ | Telegram application hash. |
-| `BOT_TOKEN` | `123456:ABC...` | ✅ | Main bot token from @BotFather. |
-| `OWNER_ID` | `123456789` | ✅ | Your numeric Telegram user ID. |
-| `DATABASE` | `mongodb+srv://.../tracking,mongodb+srv://.../storage_1` | ✅ | Exactly two comma-separated MongoDB URIs on first boot. |
-| `USER_SESSION_STRING` | Telegram session string | ⬜ | Needed only for Global Search / user-account fallback. |
+### 5. Check the first successful boot
 
-</details>
+Open **Logs** and confirm these types of messages:
 
-#### ⚙️ Add this as a Variable
+- ✅ Database connections succeed.
+- ✅ Telegram client starts.
+- ✅ Web server listens on `0.0.0.0:7860`.
+- ✅ The public Space URL returns the login page.
 
-<details>
-<summary><strong>⚙️ Tap to view Hugging Face Variables</strong></summary>
-
-| Variable name | Value | Required | Notes |
-|---|---|:---:|---|
-| `PORT` | `7860` | ✅ | Must match the Space card `app_port: 7860`. |
-
-</details>
-
-> 🔐 **Secret safety:** values stored as Hugging Face Secrets are write-only in the Space settings. Put bot tokens, MongoDB URIs, Telegram session strings, and API hashes there—never in `README.md`, commits, screenshots, or public Variables.
-
-> 🔄 **Restart behaviour:** changing a Secret, Variable, or hardware setting triggers a Space restart. Wait for the status to return to **Running** before testing.
-
-### 🗄️ 6. MongoDB Setup for Spaces
-
-Use two separate database names—these can be on the same MongoDB Atlas cluster.
+Your public address will look like:
 
 ```text
-mongodb+srv://USERNAME:PASSWORD@CLUSTER.mongodb.net/tracking,
-mongodb+srv://USERNAME:PASSWORD@CLUSTER.mongodb.net/storage_1
+https://YOUR-USERNAME-YOUR-SPACE.hf.space
 ```
 
-Paste the two URIs on **one line**, without a line break:
+### 6. Finish dashboard setup
 
-```text
-mongodb+srv://USERNAME:PASSWORD@CLUSTER.mongodb.net/tracking,mongodb+srv://USERNAME:PASSWORD@CLUSTER.mongodb.net/storage_1
-```
-
-✅ MongoDB keeps your important state outside the Space:
-
-- 🗄️ Indexed movies, shows, split files, and stream references.
-- 💬 Subtitle records, matching status, and manual language corrections.
-- 🖥️ Dashboard settings, catalog configuration, tokens, and subscriptions.
-- 🔄 Scan state and other runtime data.
-
-> 💾 Hugging Face container storage is temporary by default. Do not rely on the Space filesystem for sessions, uploads, databases, or backups. This project is designed to keep the long-lived library state in MongoDB and Telegram.
-
-### ▶️ 7. First Successful Start
-
-After the build becomes **Running**:
-
-1. Open the **direct Space URL**, not only the Hugging Face repository page:
-
-```text
-https://YOUR_HF_USERNAME-YOUR_SPACE_NAME.hf.space
-```
-
-2. Sign in to the dashboard with the initial credentials:
-
-```text
-Username: admin
-Password: admin
-```
-
+1. Open the Space URL and sign in.
+2. Change the default dashboard login immediately.
 3. Open **Admin → Settings**.
-4. Change the dashboard username and password immediately.
-5. Set **Base URL** to the exact direct Space URL:
+4. Set **Base URL** to your complete `.hf.space` URL.
+5. Add Auth channel IDs/usernames.
+6. Add a TMDb API key.
+7. Save settings.
 
-```text
-https://YOUR_HF_USERNAME-YOUR_SPACE_NAME.hf.space
-```
+### 🩺 Hugging Face fixes
 
-6. Add your **TMDb API key**.
-7. Add the Telegram channel username or numeric ID under **Auth channels**.
-8. Confirm the main bot is an administrator in every configured channel.
-9. Enable **Replace Mode** if you want newer uploads to replace an existing same-quality stream.
-10. Save Settings.
-11. Open **Admin → Tools** and run the appropriate scan for existing files.
-12. Create an access token, then install the generated manifest in Stremio or Nuvio.
-
-> 📌 **Base URL rules:** use HTTPS, use the direct `.hf.space` address, and do not add a trailing `/`. A wrong Base URL can create broken stream, subtitle, and add-on links.
-
-### 📺 8. Install the Add-on After Deployment
-
-Your personal manifest URL has this format:
-
-```text
-https://YOUR_HF_USERNAME-YOUR_SPACE_NAME.hf.space/stremio/YOUR_TOKEN/manifest.json
-```
-
-1. 🔑 Create or retrieve a user token from **Admin → Access Management**.
-2. 📋 Copy that user’s manifest URL.
-3. 🎬 Paste it into Stremio’s add-on installation flow, or Nuvio’s add-on page.
-4. 🔄 Refresh the catalog after installation.
-
-> 🛡️ Each tokenized manifest URL is private. Give every user a different token and revoke one immediately if it is shared publicly.
-
-### 🧪 9. Hugging Face Post-Deploy Checklist
-
-<details>
-<summary><strong>✅ Tap to view first-run checklist</strong></summary>
-
-| Check | Expected result |
-|---|---|
-| 🤗 Space status | **Running** |
-| 📜 Space logs | Telegram client, MongoDB tracking DB, and storage DB connect successfully. |
-| 🌐 Direct URL | Dashboard opens at `https://...hf.space`. |
-| 🔐 Dashboard | Default login is changed to your private credentials. |
-| ⚙️ Base URL | Exactly matches the direct Space URL. |
-| 🤖 Telegram | Bot is admin in each source channel. |
-| 🗄️ MongoDB | Two required connections show success in logs. |
-| 🎬 Add-on | Tokenized `/stremio/TOKEN/manifest.json` returns successfully. |
-| 💬 Subtitles | Existing unmatched records are relinked through **Subtitles → Match unmatched** after a matcher update. |
-
-</details>
-
-### 🩺 10. Hugging Face Troubleshooting
-
-<details>
-<summary><strong>🩺 Tap to view Hugging Face troubleshooting</strong></summary>
-
-| Problem | Likely cause | Fix |
-|---|---|---|
-| 🧱 Build fails before startup | Missing project files or malformed `README.md` YAML | Ensure `Dockerfile`, `Backend/`, `start.sh`, `pyproject.toml`, `uv.lock`, and the YAML Space card are in the repository root. |
-| 🚫 Space shows an error / 500 | Startup secret is missing or invalid | Check every required Secret, especially `DATABASE`, `BOT_TOKEN`, `API_ID`, and `API_HASH`. |
-| 🌐 App opens but Stremio will not play | Base URL is wrong or Space is sleeping | Set the exact `.hf.space` URL, reinstall/update the manifest, and use a running Space. |
-| 🔐 Git push says invalid username or password | Git has no valid Hugging Face authentication | Run `hf auth login` with a Write token and push again. |
-| 🤖 Bot starts but does not index files | Bot is not an admin or channel is not saved | Add the bot as channel admin, save Auth channels in the dashboard, then run a scan. |
-| 🗄️ MongoDB connection fails | Bad URI, unescaped password, or Atlas access rule | Test both URIs, URL-encode special password characters, and allow the Space to reach the cluster. |
-| 💤 Bot stops after idle time | Space went to sleep | Open the Space to wake it, or select always-running paid hardware for continuous service. |
-| 💬 Subtitle stays unmatched | Video not indexed yet or filename lacks safe title/episode data | Index the video first, then run **Match unmatched** or manually link it from Subtitles. |
-
-</details>
-
-### 🔄 11. Updating a Hugging Face Space Safely
-
-1. 🗄️ Back up MongoDB before changing major database or parser code.
-2. 💾 Keep a secure copy of your current Secrets list—never inside Git.
-3. 📤 Push or upload the updated source files.
-4. 🏗️ Watch **Build logs** until the Space returns to **Running**.
-5. 🔎 Check MongoDB connections, dashboard access, Base URL, and a test token manifest.
-6. 💬 Run **Match unmatched** after subtitle-parser updates.
-7. 🧩 Run a targeted scan only if a new scanner feature needs it.
-
-> ✅ **No reconfiguration normally required:** runtime dashboard settings persist in the tracking MongoDB database, so a normal source-code update or Space restart should not erase channel settings, tokens, subtitles, catalogs, or the media index.
+- **Build fails** — confirm the repository contains `Dockerfile`, `start.sh`, `pyproject.toml`, and `uv.lock` at the root.
+- **App opens but does not load** — verify `PORT=7860` and README `app_port: 7860` match.
+- **Database error** — recheck both URIs, Atlas user permissions, and network access.
+- **Bot does not start** — recheck `API_ID`, `API_HASH`, `BOT_TOKEN`, and `OWNER_ID` Secrets.
+- **Playback URL is wrong** — correct the Base URL in dashboard settings and reinstall or refresh the personal manifest.
 
 ---
 
-<a id="deploy-on-a-vps-with-https"></a>
-## 🛡️ Deploy on a VPS with HTTPS
+## 🛡️ VPS and HTTPS
 
-A domain and reverse proxy provide the most stable playback URL.
+### 🌐 Point a domain to the server
 
-### 🌐 1. Point Your Domain to the VPS
+Create an `A` record:
 
-Create an A record:
+```text
+Host: @
+Value: YOUR_VPS_PUBLIC_IP
+```
 
-<details>
-<summary><strong>🌐 Tap to view DNS record</strong></summary>
+### 🔐 Use Caddy for HTTPS
 
-| Type | Host | Value |
-|---|---|---|
-| `A` | `@` or a subdomain | Your VPS public IPv4 address |
-
-</details>
-
-### 🛡️ 2. Install Caddy
-
-Install Caddy using its official repository instructions for your Linux distribution, then set a basic reverse-proxy configuration:
+Install Caddy, then edit `/etc/caddy/Caddyfile`:
 
 ```caddy
-your-domain.example {
-    reverse_proxy 127.0.0.1:8000
+your-domain.com {
+    reverse_proxy localhost:8000
 }
 ```
 
-Reload Caddy after saving the file.
+Reload Caddy:
 
-### 🔗 3. Set the Dashboard Base URL
-
-In **Admin → Settings**, set:
-
-```text
-https://your-domain.example
+```bash
+sudo systemctl reload caddy
 ```
 
-Do not include a trailing slash. This URL is used when generating add-on and delivery links.
+Finally set this in **Admin → Settings → Base URL**:
+
+```text
+https://your-domain.com
+```
 
 ---
 
-<a id="first-run-dashboard-setup"></a>
-## 🖥️ First-Run Dashboard Setup
+## 🖥️ First Dashboard Setup
 
-Open the web dashboard, sign in, then visit **Admin → Settings**.
-
-Initial credentials:
+Open the deployment URL. The initial login is usually:
 
 ```text
 Username: admin
 Password: admin
 ```
 
-> 🚨 **Change these immediately** before inviting anyone to use the service.
+Change it immediately.
 
-### ✅ Essential Settings
+### ✅ Essential settings
 
-<details>
-<summary><strong>⚙️ Tap to view recommended dashboard settings</strong></summary>
+- **Base URL** — your public HTTPS domain or `.hf.space` URL.
+- **Auth channels** — Telegram channels to index and stream from.
+- **TMDb API key** — improves movie and series matching.
+- **Replace Mode** — recommended on; newer files can replace matching title/episode/quality entries.
+- **Catalog visibility** — choose whether the general catalog is visible.
 
-| Setting | Recommended value | Why it matters |
-|---|---|---|
-| Admin username / password | Your own secure credentials | Protects the dashboard. |
-| Base URL | Your exact public HTTPS URL | Required for add-on, stream, and subtitle links. |
-| TMDb API key | Your v3 key | Improves title matching and catalog metadata. |
-| Auth channels | Your media channels | Defines where scans and live indexing operate. |
-| Replace Mode | Enabled | Replaces an old stream with a new file of the same title/episode/quality. |
-| Hide Catalog | Disabled for browsing; enabled for direct-library-only use | Controls public catalog availability in the add-on. |
+### ➕ Optional settings
 
-</details>
-
-### ➕ Optional Settings
-
-<details>
-<summary><strong>🧰 Tap to view optional dashboard settings</strong></summary>
-
-| Setting | Use |
-|---|---|
-| Extra storage databases | Expand the library beyond the initial storage database. |
-| Multi-token clients | Add additional Telegram bot tokens for more parallel streaming capacity. Each bot must be an admin in the media channels. |
-| HTTP proxy URL | Route outbound metadata/API requests through an HTTP proxy. |
-| Show proxied and direct links | Offer both stream styles when a proxy is configured. |
-| Subscription | Enable subscription and payment flow. |
-| Global Search | Search selected Telegram channels using the optional user-session client. |
-| Upstream repository / branch | Source used by the owner-only restart/update workflow. |
-
-</details>
-
-Most runtime settings save to MongoDB and apply without rebuilding the container. Startup credentials and a newly added user session should be set before a restart.
+- **Extra storage databases** — expand stream-reference storage.
+- **Additional bot clients** — more parallel capacity during higher load.
+- **Subscriptions** — plan, approval, expiry, and membership checks.
+- **Proxy** — use for outbound metadata requests where needed.
+- **Global Search** — requires `USER_SESSION_STRING` and selected channel IDs.
 
 ---
 
-<a id="add-stremio-or-nuvio"></a>
-## 📺 Add Stremio or Nuvio
+## 📺 Install in Stremio or Nuvio
 
-Each user should use a personal tokenized manifest URL:
+### 🔑 Create a token
+
+1. Open **Admin → Access Management**.
+2. Create a token or assign one to a user.
+3. Copy its personal manifest URL.
+
+Standard URL pattern:
 
 ```text
-https://YOUR_DOMAIN/stremio/YOUR_TOKEN/manifest.json
+https://YOUR-DOMAIN/stremio/YOUR-TOKEN/manifest.json
 ```
 
-### 🔑 Create or Retrieve a Token
-
-- 🔑 Open **Admin → Access Management** and create/manage the user token.
-- 🔑 In non-subscription mode, the owner can also send `/start` to the bot to receive an add-on link.
-- 🔑 In subscription mode, the bot supplies a token after the user is approved.
-
-### 🎬 Install in Stremio
+### 🎬 Stremio
 
 1. Open Stremio.
-2. Use the add-on installation flow.
-3. Paste the full personal manifest URL.
-4. Install or update the add-on.
+2. Go to **Add-ons**.
+3. Paste the personal manifest URL.
+4. Install or update it.
 
-### 📺 Install in Nuvio
+### 📺 Nuvio
 
 1. Open Nuvio.
-2. Go to the add-on section.
-3. Paste the same full personal manifest URL.
-4. Install it, then refresh the catalog if needed.
+2. Open **Add-ons**.
+3. Paste the same personal manifest URL.
+4. Install it and open your library.
 
-> 🔐 **Treat this link like a password.** Do not share a tokenized manifest URL publicly. Revoke the token from Access Management if it is exposed.
+> 🔐 Give each user a separate token. Revoke a token immediately if it is exposed.
 
 ---
 
-<a id="upload-and-naming-guide"></a>
-## 📤 Upload & Naming Guide
-
-The matcher accepts many real-world filenames, but a clean file name produces faster and more accurate metadata.
+## 📤 Upload and Naming Guide
 
 ### 🎞️ Movies
 
-Recommended pattern:
+Use a clean title and year whenever possible:
 
 ```text
-Title (Year) 1080p WEB-DL x264 AAC.mkv
+Movie Title (2026) 1080p WEB-DL x265.mkv
 ```
 
-Example:
+Useful optional tags: resolution, source, codec, audio, and release group.
+
+### 📺 TV episodes
+
+Always include a season and episode marker:
 
 ```text
-Saiyaara (2025) 720p NF WEB-DL AAC 5.1 HEVC.mkv
+Series Title S01E04 1080p WEB-DL.mkv
 ```
 
-Include:
+Both `S01E04` and `S01 E04` are clear. Keep the same series name across episodes.
 
-- 🎞️ Title
-- 🎞️ Year
-- 🎞️ Resolution or quality when available
+### 🛠️ Correct wrong metadata
 
-The source, codec, audio tags, and release group are optional.
+- Open **Media Management → Edit** and use metadata search.
+- Or use `/set <IMDb-or-TMDb-URL>` before forwarding the related upload batch.
+- Send `/set` with no URL to clear the temporary override.
 
-### 📺 TV Episodes
+---
 
-Recommended pattern:
+## 💬 Subtitles
 
-```text
-Series Name S01E04 1080p WEB-DL DDP5.1.mkv
-```
+### 📄 Supported formats
+
+- `.srt`
+- `.vtt`
+- `.ass`
+- `.ssa`
+- `.sub`
+- `.smi`
+- `.sami`
+
+### 🌍 Language detection
+
+The scanner reads language names and well-known language codes from the subtitle filename and caption.
 
 Examples:
 
 ```text
-Hell's Paradise S01E01 1080p WEBRip 10bit.mkv
-Series Name 1x04 720p WEB-DL.mkv
+Movie Title (2026).Sinhala.srt
+Movie Title (2026).si.srt
+Series Title S01E01.Japanese.srt
+Movie Title (2026).Arabic.srt
 ```
 
-Use `S01E01` whenever possible. The parser also recognizes `1x01` and textual season/episode patterns.
+### 🇱🇰 Sinhala fallback
 
-### 🛠️ Manual Metadata Override
+- An explicitly detected language such as English, Japanese, Arabic, Tamil, Hindi, Malayalam, Telugu, or Sinhala always stays unchanged.
+- A truly unlabelled subtitle defaults to **Sinhala (`si`)**.
+- An uploader/group suffix is not treated as a language just because it looks like a short code.
 
-When a file resolves to the wrong movie or show:
+### 🧬 Matching order
 
-1. Open the media item in **Media Management**.
-2. Choose **Edit**.
-3. Use metadata search and apply the correct result.
+The subtitle matcher uses safe signals in this order:
 
-For an upload batch, the owner can use:
+1. Explicit subtitle tag or IMDb/TMDb ID.
+2. Exact movie title and year.
+3. Series title with `SxxEyy` episode marker.
+4. Cleaned filename matching after removing release noise.
+5. Metadata aliases, including romanized or localized titles.
+6. Manual relink from the dashboard.
 
-```text
-/set https://www.imdb.com/title/tt1234567/
-```
+### 🏷️ Guaranteed manual subtitle link
 
-Forward the related files, then clear the temporary override:
-
-```text
-/set
-```
-
-The command accepts an IMDb or TMDb URL.
-
----
-
-<a id="subtitle-system"></a>
-## 💬 Subtitle System
-
-### 📄 Supported Formats
-
-<details>
-<summary><strong>💬 Tap to view supported subtitle formats</strong></summary>
-
-| Extension | Supported |
-|---|:---:|
-| `.srt` | Yes |
-| `.vtt` | Yes |
-| `.ass` | Yes |
-| `.ssa` | Yes |
-| `.sub` | Yes |
-| `.smi` / `.sami` | Yes |
-
-</details>
-
-Subtitle documents can be indexed during a channel scan or when they arrive in a configured media channel.
-
-### 🌍 Language Detection
-
-The parser checks the subtitle caption and filename for a supported language name, alias, or credible release-language code.
-
-Examples that remain explicitly detected:
-
-```text
-Movie.2025.Sinhala.srt                 → Sinhala (si)
-Movie.2025.720p.si.WEB-DL.srt          → Sinhala (si)
-Movie.2025.English.srt                 → English (en)
-Anime.S01E01.Japanese.Sub.srt          → Japanese (ja)
-Film.2025.Arabic.srt                   → Arabic (ar)
-```
-
-### 🇱🇰 Sinhala Default Behaviour
-
-When the filename and caption contain **no recognized supported language**, the subtitle defaults to **Sinhala (`si`)**.
-
-```text
-Movie Title 2025.srt                   → Sinhala (si)
-```
-
-An explicit language always has priority. A filename that clearly says `English`, `Japanese`, `Arabic`, `Tamil`, `Hindi`, and similar languages will not be changed to Sinhala.
-
-### 🧬 Subtitle Matching Order
-
-The service applies the safest match first:
-
-1. Explicit subtitle tag with IMDb or TMDb ID.
-2. Embedded IMDb/TMDb ID in the caption or filename.
-3. Local movie/series matching by normalized title, year, season, and episode.
-4. Metadata alias lookup for translated, romanized, or alternate names.
-5. Unmatched queue for manual correction or a later relink.
-
-### 📝 Best Subtitle Naming Patterns
-
-Movie subtitle:
-
-```text
-Movie Title (2025) Sinhala.srt
-Movie.Title.2025.720p.si.WEB-DL.srt
-```
-
-Episode subtitle:
-
-```text
-Series Name S01E02 Sinhala.srt
-Series_Name_S01E02_JAPANESE_1080p.srt
-```
-
-### 🏷️ Guaranteed Manual Link Tag
-
-Use an explicit ID when a subtitle has a difficult title:
+Add a tag anywhere in the subtitle caption or filename:
 
 ```text
 [SUB:tt1234567 si]
 ```
 
-For an episode:
+- `tt1234567` — target IMDb ID.
+- `si` — subtitle language code.
+
+### 🔄 Repair unmatched subtitles
+
+1. Make sure the matching movie or episode is already indexed.
+2. Open **Subtitles**.
+3. Select **Match unmatched**.
+4. Use manual match/edit when the file needs a specific target.
+
+> 💡 A subtitle marked **unmatched** is still stored safely; it simply has no verified media target yet.
+
+---
+
+## 🧩 Split Files
+
+The scanner supports common multipart archive names such as:
 
 ```text
-[SUB:tt1234567 S01E02 Sinhala]
+Movie.Title.2026.mkv.zip.001
+Movie.Title.2026.mkv.zip.002
 ```
 
-Place this in the Telegram caption or subtitle filename. The ID removes title ambiguity and the season/episode marker limits the subtitle to the correct episode.
+For reliable virtual playback:
 
-### 🔄 Fix Old Unmatched Subtitles
-
-After improving filenames, indexing media later, or deploying a newer subtitle matcher:
-
-1. Open **Subtitles** in the dashboard.
-2. Filter by **Unmatched** if necessary.
-3. Press **Match unmatched**.
-
-Relinking reparses stored subtitle names, refreshes the language where required, and attempts local plus metadata-alias matching again. It does not delete the subtitle document.
+- Upload every part to the same indexed channel.
+- Keep the base filename identical across all parts.
+- Do not rename only one volume.
+- Complete the upload before running a scan.
+- Run a Media or Full scan if the grouped virtual stream does not appear yet.
 
 ---
 
-<a id="split-files-and-archive-volumes"></a>
-## 🧩 Split Files & Archive Volumes
+## 🔍 Scans and Catalogs
 
-The scanner recognizes supported multipart sources, including common numbered archive/upload parts such as `.zip.001`, `.zip.002`, and compatible split video uploads.
+### 🔎 Scan tools
 
-When all required parts are available, Stremio-TG stores one virtual media record with part references and presents it as a single stream. It does not show every part as a separate movie or episode.
+Use **Admin → Tools**:
 
-### ✅ Recommendations
+- **Media scan** — video files and split media.
+- **Subtitle scan** — subtitle documents only.
+- **Full scan** — media, subtitles, and supported split groups.
+- **Targeted scan** — use after a small upload or correction.
 
-- ✅ Keep all parts in the same indexed channel.
-- ✅ Use consecutive numbered parts with the same base filename.
-- ✅ Upload every required volume before expecting playback.
-- ✅ Avoid unrelated files with the same base name between split parts.
-- ✅ Do not rename only one part after upload.
+Scan again after:
 
-The scanner validates split candidates conservatively so ordinary filenames such as `1080p`, `720p`, or other numbers are not incorrectly treated as split parts.
-
----
-
-<a id="scanning-matching-and-catalog-tools"></a>
-## 🔍 Scanning, Matching & Catalog Tools
-
-### 🔍 Channel Scans
-
-Open **Admin → Tools** to start a scan.
-
-<details>
-<summary><strong>🔍 Tap to view scan scopes</strong></summary>
-
-| Scope | What it does |
-|---|---|
-| Media | Indexes or refreshes movies, series, episodes, and compatible split uploads. |
-| Subtitles | Indexes subtitle documents without clearing media records. |
-| Full | Processes media and subtitles together, then runs final subtitle relinking. |
-
-</details>
-
-The scan state tracks progress and supports resume behavior. A full scan keeps its subtitle status accurate even when a subtitle is indexed before its matching video appears later in the same channel.
-
-### ♻️ When to Scan Again
-
-Run the appropriate scope after:
-
-- ♻️ Adding an existing channel to settings.
-- ♻️ Migrating a library to a new database.
-- ♻️ Renaming old Telegram captions.
-- ♻️ Deploying improved subtitle or split-file detection.
-- ♻️ Fixing incorrectly matched media in bulk.
+- Adding a new channel.
+- Fixing file captions or filenames.
+- Updating subtitle matching code.
+- Uploading all parts of a split archive.
+- Moving or restoring content.
 
 ### 🗃️ Catalogs
 
-The catalog page supports:
+- Create custom catalogs from the dashboard.
+- Enable automatic catalog synchronization only for the catalogs you want.
+- Catalog quick sync can skip already-classified files; this is normal.
+- Use Media Management to correct a title that was classified incorrectly.
 
-- 🗃️ Custom catalogs.
-- 🗃️ Adding or removing media from a catalog.
-- 🗃️ Auto-sync settings and status.
-- 🗃️ Metadata-driven collections.
+### 🔗 Dead links
 
-Automatic catalog synchronization uses the configured metadata key and can skip records that are already classified. A log such as `scanned: 29, skipped: 29, classified: 0` is normal when all scanned entries already have the needed catalog data.
-
-### 🔗 Dead Links
-
-The background dead-link checker verifies stored Telegram sources. Use dashboard tools to inspect or purge dead entries when a source message has been deleted or is no longer accessible.
+The background checker validates existing Telegram references. Use dashboard tools to review and repair/remove unavailable entries when a source message has been deleted or become unreachable.
 
 ---
 
-<a id="access-tokens-and-subscriptions"></a>
-## 🔐 Access Tokens & Subscriptions
+## 🔐 Tokens and Subscriptions
 
-### 🔑 Access Tokens
+### 🔑 Access tokens
 
-Every installed add-on uses a token. From **Admin → Access Management**, you can:
+- Create individual personal tokens from **Access Management**.
+- Set expiry or revoke access when needed.
+- Delete and recreate a token if it was shared publicly.
+- Share only the user’s personal manifest URL.
 
-- 🔑 Create a token.
-- 🔑 View active and expired tokens.
-- 🔑 Assign or extend access.
-- 🔑 Revoke access.
-- 🔑 Delete a token.
-- 🔑 Link an older token to a Telegram user ID.
-- 🔑 Configure limits where available.
+### 💳 Optional subscriptions
 
-Use a separate token for each person. Revoke a token immediately if a manifest URL is shared accidentally.
+When subscription mode is enabled:
 
-### 💳 Optional Subscriptions
+- Users choose a plan through the bot.
+- They submit payment proof.
+- Approved users receive a personal add-on URL.
+- Expired users are prompted to renew through the bot.
+- Optional group-membership checks can restrict streaming to subscribed channel members.
 
-Enable subscriptions in **Admin → Settings** only when you need paid or managed access.
-
-Configure:
-
-- 💳 Subscription toggle.
-- 💳 Subscription group ID.
-- 💳 Subscription/group URL.
-- 💳 Approver Telegram IDs.
-- 💳 Payment instructions.
-- 💳 Optional payment QR image URL.
-
-Then create plans from **Admin → Subscription Management**.
-
-User flow:
-
-```text
-/start
-  → select plan
-  → receive payment instructions
-  → send payment screenshot
-  → approver accepts or rejects
-  → user receives personal Stremio add-on link
-```
-
-When subscriptions are active, the add-on verifies token ownership, subscription status, expiry, and configured group membership before returning streams.
+Configure plans, approver IDs, payment text, and group settings from the dashboard.
 
 ---
 
-<a id="global-search"></a>
 ## 🌐 Global Search
 
-Global Search can search selected Telegram channels that are not already fully indexed in the local catalog.
+Global Search needs a Telegram user-session client.
 
-#<a id="requirements"></a>
-## 🧰 Requirements
+1. Set `USER_SESSION_STRING` before startup.
+2. Restart the application.
+3. Enable Global Search from dashboard settings.
+4. Add the channel IDs to search.
 
-- 🧰 A valid `USER_SESSION_STRING` in startup configuration.
-- 🧰 A restart after adding or replacing the session string.
-- 🧰 Global Search enabled from **Admin → Settings**.
-- 🧰 Valid numeric Telegram channel IDs in the Global Search channel list.
-
-The user session belongs to a real Telegram account. Protect it as carefully as a password:
-
-- 🧰 Never place it in GitHub.
-- 🧰 Never send it to another person.
-- 🧰 Revoke the session from Telegram **Settings → Devices** if exposed.
-
-Global Search results are filtered by title/episode relevance and can return up to the configured limits from selected channels.
+> ⚠️ A user session can access your Telegram account. Keep it private, revoke it from Telegram Devices if exposed, and use it only for channels you are allowed to access.
 
 ---
 
-<a id="bot-commands"></a>
 ## 🤖 Bot Commands
 
-<details>
-<summary><strong>🤖 Tap to view bot commands</strong></summary>
+- `/start` — provides the available add-on access flow.
+- `/set <IMDb-or-TMDb-URL>` — sets temporary metadata for the next related uploads.
+- `/set` — clears the temporary metadata override.
+- `/stats` — owner statistics.
+- `/log` — sends the current log to the owner.
+- `/restart` — runs the configured restart/update workflow.
+- `/status` — subscription status when subscription mode is enabled.
 
-| Command | Access | Purpose |
-|---|---|---|
-| `/start` | Owner in standard mode; users in subscription mode | Provides the available add-on access flow. |
-| `/set <IMDb-or-TMDb-URL>` | Owner | Sets a temporary metadata override for files uploaded next. |
-| `/set` | Owner | Clears the temporary metadata override. |
-| `/stats` | Owner | Sends database, stream, channel, and uptime statistics. |
-| `/log` | Owner | Sends the current log file. |
-| `/restart` | Owner | Runs the configured restart/update workflow. |
-| `/status` | Subscription mode | Shows subscription status and expiry. |
-
-</details>
-
-> ✅ **Normal startup behaviour:** the bot refreshes its command list on boot. A log showing that existing commands were deleted and re-created is expected.
+> ✅ Command availability depends on your role and enabled features.
 
 ---
 
-<a id="dashboard-pages"></a>
 ## 🖥️ Dashboard Pages
 
-<details>
-<summary><strong>🖥️ Tap to view dashboard pages</strong></summary>
+- `/` — main dashboard and service overview.
+- `/media/manage` — browse, edit, rescan, and remove media.
+- `/subtitles` — search, filter, edit, relink, match, or delete subtitles.
+- `/catalogs` — manage custom catalogs and auto-sync.
+- `/admin/access` — manage tokens and access.
+- `/admin/subscriptions` — plans and subscription users.
+- `/admin/settings` — runtime configuration.
+- `/admin/tools` — scans, checks, and maintenance.
+- `/status` — public service status.
 
-| Page | Purpose |
-|---|---|
-| `/` | Main dashboard, service status, stream statistics, and shortcuts. |
-| `/admin/dashboard` | Administrative overview and system health. |
-| `/media/manage` | Browse, edit, rescan, and remove movies or TV entries. |
-| `/subtitles` | Search, filter, edit, relink, manually match, or delete subtitles. |
-| `/catalogs` | Create and manage custom catalogs and automatic catalog sync. |
-| `/admin/access` | Manage tokens, users, limits, access dates, and revocation. |
-| `/admin/subscriptions` | Create plans and manage subscription users. |
-| `/admin/settings` | Save runtime settings. |
-| `/admin/tools` | Run channel scans, database checks, and dead-link maintenance. |
-| `/status` | Public status page. |
-| `/stremio` | Add-on installation guidance page. |
-
-</details>
-
-> 🔐 **Expected security behaviour:** dashboard API calls redirect to `/login` when you are signed out. A `302 Found` for `/api/system/stats` means authentication is protecting the endpoint; it is not an application crash.
+> 🔐 A `302 Found` redirect to `/login` for protected dashboard APIs is normal when you are signed out.
 
 ---
 
-<a id="troubleshooting"></a>
 ## 🩺 Troubleshooting
 
-### 🔐 The Dashboard Redirects to `/login`
+### 🔐 Dashboard sends you to `/login`
 
-A `302 Found` response from a protected endpoint is normal when the browser has no valid dashboard session. Sign in again and reload the page.
+Your dashboard session is missing or expired. Sign in again. A `302 Found` for protected API routes is expected security behavior.
 
-### ✅ The Manifest Ping Reports `Status: 200`
+### ✅ Manifest pinger shows `Status: 200`
 
-This is healthy. The background pinger is confirming the add-on manifest is reachable.
+This is healthy: the public add-on manifest is reachable.
 
-### 🧠 Metadata Is Wrong or Missing
+### 🧠 Metadata is wrong or missing
 
-1. Confirm a TMDb API key and Base URL are set in dashboard settings.
-2. Use **Media Management → Edit → metadata search**.
-3. For a related upload batch, use `/set` with the correct IMDb or TMDb URL before forwarding files.
-4. Ensure the filename includes a clean title and release year.
+- Set TMDb API key and Base URL.
+- Open **Media Management → Edit** and run metadata search.
+- Use `/set` with the correct IMDb/TMDb URL for the next upload batch.
+- Use clean title, year, and `SxxEyy` naming.
 
-### 💬 A Subtitle Is Indexed but Unmatched
+### 💬 Subtitle is indexed but unmatched
 
-This does not mean the file was lost. It means no safe media target was found at that time.
+- Index the matching movie or episode first.
+- Add a clear title/year or `SxxEyy` marker.
+- Add `[SUB:tt… language]` for a guaranteed link.
+- Open **Subtitles → Match unmatched**.
 
-- 💬 Confirm the matching movie or episode is indexed.
-- 💬 Ensure movie title/year or series `SxxEyy` information is present.
-- 💬 Add a `[SUB:tt…]` tag for guaranteed matching.
-- 💬 Open **Subtitles → Match unmatched** after the video is available.
+### 🌍 Subtitle language is wrong
 
-### 🌍 A Subtitle Shows the Wrong Language
+- Add a clear language name such as `Sinhala`, `English`, `Arabic`, or `Japanese`.
+- Use a recognized code such as `.si`, `.en`, `.ar`, or `.ja`.
+- Edit the subtitle record from the dashboard if needed.
 
-- 🌍 Put the full language name in the filename or caption, for example `Sinhala`, `English`, `Arabic`, or `Japanese`.
-- 🌍 Use a credible release code such as `.si.WEB-DL` rather than an ambiguous final uploader suffix.
-- 🌍 Edit the subtitle from the dashboard if the original document needs a manual correction.
+### 🤖 Bot does not index files
 
-> 🇱🇰 **Sinhala fallback:** unlabelled subtitles default to Sinhala by design. Explicitly detected languages remain unchanged.
+- Confirm channel is in **Auth channels**.
+- Confirm bot is an admin and can see channel messages.
+- Run the correct scan scope from **Admin → Tools**.
+- Use `/log` as owner to check the exact error.
 
-### 🤖 The Bot Does Not Index Channel Files
+### 🧩 Split upload is not one stream
 
-- 🤖 Confirm the channel is listed in **Auth channels**.
-- 🤖 Confirm the bot is an administrator in that channel.
-- 🤖 Verify the bot can view the media messages.
-- 🤖 Run a Media, Subtitle, or Full scan from **Admin → Tools**.
-- 🤖 Check `/log` as owner for the exact parse or Telegram error.
+- Confirm all volumes exist.
+- Keep matching base filenames.
+- Keep all volumes in the same channel.
+- Run a Media or Full scan after the upload completes.
 
-### 🧩 A Split File Does Not Appear as One Stream
+### 🚫 Invalid or expired API token
 
-- 🧩 Confirm every part was uploaded.
-- 🧩 Use consistent filenames such as `Movie.mkv.zip.001`, `Movie.mkv.zip.002`.
-- 🧩 Keep the parts in the same indexed channel.
-- 🧩 Run a Media or Full scan after all parts are present.
+Create a fresh token in Access Management, install its manifest URL, and revoke the old one when appropriate.
 
-### 🚫 `Invalid or expired API token`
+### 🗄️ MongoDB connection fails
 
-The add-on URL does not contain a valid active token. Generate a new token from **Access Management**, install the new manifest URL, and revoke the exposed/old token if appropriate.
-
-### 🌐 Global Search Is Unavailable
-
-- 🌐 Confirm `USER_SESSION_STRING` is set before start.
-- 🌐 Restart the application.
-- 🌐 Enable Global Search in runtime settings.
-- 🌐 Add valid numeric channel IDs.
-- 🌐 Check that the Telegram user session is still active and not revoked.
-
-### 🗄️ MongoDB Connection Fails
-
-- 🗄️ Verify both URI values are valid and comma-separated with no accidental extra commas.
-- 🗄️ URL-encode password special characters.
-- 🗄️ Check Atlas database-user permissions.
-- 🗄️ Check Atlas Network Access rules.
+- Check both URIs are present and separated by one comma.
+- URL-encode password special characters.
+- Check Atlas database-user permissions and network rules.
 
 ---
 
-<a id="security-checklist"></a>
 ## 🔒 Security Checklist
 
-Before giving anyone access:
-
-- [ ] Change the dashboard `admin / admin` credentials.
-- [ ] Keep `config.env` outside Git history.
-- [ ] Store platform credentials as secrets, not visible environment variables.
-- [ ] Use a strong MongoDB password and least-privilege database user.
+- [ ] Change the default dashboard login.
+- [ ] Keep `config.env` and secrets outside Git history.
+- [ ] Use platform Secrets for credentials.
+- [ ] Use a strong MongoDB password.
 - [ ] Use HTTPS for the Base URL.
-- [ ] For Stremio/Nuvio playback, use a public Space only with app-level token protection; use private channels and keep all credentials in Secrets.
-- [ ] Give every user a separate add-on token.
-- [ ] Revoke leaked tokens from Access Management.
-- [ ] Protect `USER_SESSION_STRING` like a Telegram account password.
-- [ ] Keep Telegram channels private unless you intentionally want public access.
-- [ ] Back up MongoDB before large scans, bulk cleanup, or database changes.
+- [ ] Keep Telegram source channels private unless intentionally public.
+- [ ] Give each user a separate manifest token.
+- [ ] Revoke leaked tokens immediately.
+- [ ] Protect `USER_SESSION_STRING` like a Telegram password.
+- [ ] Back up MongoDB before bulk scans or destructive cleanup.
 
 ---
 
-<a id="project-layout"></a>
 ## 🗂️ Project Layout
 
 ```text
 .
-├── Backend/
-│   ├── fastapi/                 # Dashboard, API routes, Stremio routes, static assets
-│   ├── helper/                  # Metadata, scans, subtitles, catalogs, DB, split files
-│   ├── pyrofork/                # Telegram bot clients and command plugins
-│   ├── config.py                # Startup environment reader
-│   └── __main__.py              # Service startup
-├── assets/                      # Branding assets
-├── Dockerfile                   # Docker image definition
-├── docker-compose.yaml          # Docker Compose deployment
-├── sample_config.env            # Startup configuration template
-├── start.sh                     # Container start command
-├── pyproject.toml               # Python project dependencies
-└── README.md                    # This guide
+├── Backend/                 # FastAPI, Telegram clients, scans, metadata, subtitles
+├── assets/                  # Branding assets
+├── Dockerfile               # Docker image
+├── docker-compose.yaml      # Docker Compose setup
+├── sample_config.env        # Startup configuration template
+├── start.sh                 # Container startup command
+├── pyproject.toml           # Python dependencies
+└── README.md                # This guide
 ```
 
 ---
 
-<a id="updating-safely"></a>
-## 🔄 Updating Safely
+## 🔄 Update Safely
 
-1. Back up the tracking and storage databases.
-2. Save a copy of `config.env` or your platform secrets list.
-3. Pull the new code.
-4. Rebuild/restart the deployment.
-5. Open the dashboard and confirm the settings revision, channels, base URL, and token access.
-6. Run **Match unmatched** after a subtitle matcher update.
-7. Run a targeted scan only when needed; avoid unnecessary destructive reindex operations.
+1. Back up tracking and storage MongoDB databases.
+2. Keep a secure copy of secrets/configuration.
+3. Pull or upload the new project code.
+4. Rebuild and restart the service.
+5. Confirm dashboard settings, Base URL, channels, and access tokens.
+6. Run **Match unmatched** after a subtitle-matcher update.
+7. Run targeted scans only when necessary.
 
-For Docker Compose:
+Docker Compose update:
 
 ```bash
 git pull
@@ -1321,54 +790,30 @@ docker compose logs -f
 
 ---
 
-<a id="credits"></a>
-## 💙 Credits & Upstream Project
-
-<div align="center">
-
-### ✨ Built with respect for the original project
-
-<a href="https://github.com/weebzone/Telegram-Stremio">
-  <img src="https://img.shields.io/badge/%F0%9F%92%99%20Forked%20from-weebzone%2FTelegram--Stremio-0D1117?style=for-the-badge&logo=github&logoColor=white" alt="Forked from weebzone/Telegram-Stremio" />
-</a>
-
-<br />
-<br />
-
-> 💙 **Forked from [weebzone/Telegram-Stremio](https://github.com/weebzone/Telegram-Stremio)**  
-> Original project foundation by **Weebzone** — thoughtfully customized and maintained by [**tharindu899**](https://github.com/tharindu899).
-
-</div>
-
-<br />
-
-<details>
-<summary><strong>💙 Tap to view project credits</strong></summary>
-
-| 🌟 Project / Service | 🎯 Contribution |
-|---|---|
-| [💙 Weebzone / Telegram-Stremio](https://github.com/weebzone/Telegram-Stremio) | Original Telegram-to-Stremio project foundation. |
-| [🎬 Stremio](https://www.stremio.com/) | Add-on ecosystem and media client platform. |
-| [⚡ FastAPI](https://fastapi.tiangolo.com/) | API and dashboard service framework. |
-| [🍃 MongoDB](https://www.mongodb.com/) | Metadata, settings, token, subtitle, and catalog storage. |
-| [🤗 Hugging Face Spaces](https://huggingface.co/spaces) | Docker deployment platform. |
-| [✨ tharindu899](https://github.com/tharindu899) | Custom branding, UI, subtitle workflow, and deployment documentation. |
-
-</details>
-
-> 🤝 **Upstream respect:** Keep the original license and this credit when sharing your fork. Check upstream changes before merging future updates, while keeping your custom features independent.
-
----
-
-<a id="license"></a>
-## 📜 License
-
-📜 This project is distributed under the **GNU General Public License v3.0**. See [`LICENSE`](LICENSE) for the full license text.
-
----
+## 💙 Credits
 
 <p align="center">
-  <strong>🎬 TharinduHub • Stremio-TG</strong><br />
-  <sub>Built with ❤️ for a clean private Telegram library experience</sub><br />
+  <a href="https://github.com/weebzone/Telegram-Stremio">
+    <img src="https://img.shields.io/badge/%F0%9F%92%99%20Forked%20from-weebzone%2FTelegram--Stremio-0D1117?style=for-the-badge&logo=github&logoColor=white" alt="Forked from weebzone/Telegram-Stremio" />
+  </a>
+</p>
+
+> 💙 **Forked from [weebzone/Telegram-Stremio](https://github.com/weebzone/Telegram-Stremio)**  
+> Original project foundation by **Weebzone** — customized and maintained by [**tharindu899**](https://github.com/tharindu899).
+
+- 🎬 **Stremio** — add-on ecosystem and playback clients.
+- ⚡ **FastAPI** — web API and dashboard.
+- 🍃 **MongoDB** — metadata, settings, tokens, subtitles, and catalogs.
+- 🤗 **Hugging Face Spaces** — Docker deployment option.
+
+---
+
+## 📜 License
+
+Distributed under the **GNU General Public License v3.0**. See [`LICENSE`](LICENSE).
+
+<p align="center">
+  <strong>🎬 TharinduHub • Stremio-TG</strong><br/>
+  <sub>Private Telegram library · Smart metadata · Better subtitles</sub><br/>
   <sub>💙 Forked from <a href="https://github.com/weebzone/Telegram-Stremio">weebzone/Telegram-Stremio</a> · Customized by <a href="https://github.com/tharindu899">tharindu899</a></sub>
 </p>
