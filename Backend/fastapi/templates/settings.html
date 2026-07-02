@@ -34,7 +34,7 @@
         <div class="setting-options two-up">
           <label class="switch-option"><input type="checkbox" id="replace_mode" {% if settings.replace_mode %}checked{% endif %}><span class="switch-track"></span><span class="switch-copy"><strong>Replace mode</strong><small>New media replaces the matching quality and removes the older Telegram source post after the new file is indexed. A subtitle replaces only its matching movie/episode and language.</small></span></label>
           <label class="switch-option"><input type="checkbox" id="hide_catalog" {% if settings.hide_catalog %}checked{% endif %}><span class="switch-track"></span><span class="switch-copy"><strong>Hide public catalog</strong><small>Keep catalog browsing private while direct access tokens continue to work.</small></span></label>
-          <label class="switch-option"><input type="checkbox" id="upload_status_messages" {% if settings.upload_status_messages %}checked{% endif %}><span class="switch-track"></span><span class="switch-copy"><strong>Upload status messages</strong><small>Post a compact success, failed, or pending reply for video, split, subtitle, and unsupported uploads. Indexing never waits for these replies.</small></span></label>
+          <label class="switch-option"><input type="checkbox" id="upload_status_messages" {% if settings.upload_status_messages %}checked{% endif %}><span class="switch-track"></span><span class="switch-copy"><strong>Upload status messages</strong><small>Send a compact success, failed, or pending status to the configured owner in the bot private chat. Nothing is posted in the source channel, and indexing never waits for these messages.</small></span></label>
         </div>
       </section>
 
