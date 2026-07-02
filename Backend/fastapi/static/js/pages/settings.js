@@ -77,6 +77,7 @@ async function saveSettings() {
     const payload = {
         replace_mode: Boolean(byId('replace_mode')?.checked),
         hide_catalog: Boolean(byId('hide_catalog')?.checked),
+        upload_status_messages: Boolean(byId('upload_status_messages')?.checked),
         admin_username: byId('admin_username')?.value.trim() || '',
         admin_password: byId('admin_password')?.value || '',
         tmdb_api: byId('tmdb_api')?.value.trim() || '',
@@ -163,6 +164,7 @@ async function refreshSettingsFromServer() {
 function renderSettings(settings) {
     byId('replace_mode').checked = Boolean(settings.replace_mode);
     byId('hide_catalog').checked = Boolean(settings.hide_catalog);
+    byId('upload_status_messages').checked = Boolean(settings.upload_status_messages);
     byId('subscription').checked = Boolean(settings.subscription);
     byId('show_proxy_and_non_proxy_both').checked = Boolean(settings.show_proxy_and_non_proxy_both);
     byId('global_search').checked = Boolean(settings.global_search);

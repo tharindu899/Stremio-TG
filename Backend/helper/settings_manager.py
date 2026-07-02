@@ -24,6 +24,7 @@ _DEFAULTS: Dict[str, Any] = {
     "payment_qr_url": "",
     "http_proxy_url": "",
     "show_proxy_and_non_proxy_both": False,
+    "upload_status_messages": True,
     "multi_tokens": [],
     "extra_databases": [],
     "global_search": False,
@@ -55,6 +56,7 @@ def _seed_from_env() -> Dict[str, Any]:
         "global_search_channels":       [],
         "http_proxy_url":               Telegram.HTTP_PROXY_URL,
         "show_proxy_and_non_proxy_both": Telegram.SHOW_PROXY_AND_NON_PROXY_BOTH,
+        "upload_status_messages":       Telegram.UPLOAD_STATUS_MESSAGES,
         "multi_tokens":                 [],
         "extra_databases":              list(Telegram.DATABASE[2:]) if len(Telegram.DATABASE) > 2 else [],
     })
@@ -88,6 +90,10 @@ class Settings:
     @property
     def show_proxy_and_non_proxy_both(self) -> bool:
         return bool(self._d["show_proxy_and_non_proxy_both"])
+
+    @property
+    def upload_status_messages(self) -> bool:
+        return bool(self._d.get("upload_status_messages", True))
 
     @property
     def global_search(self) -> bool:

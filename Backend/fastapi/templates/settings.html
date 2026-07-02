@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Settings · TG Stremio{% endblock %}
 {% block extra_head %}
-<link rel="stylesheet" href="/static/css/pages/settings.css?v=3.6.120">
+<link rel="stylesheet" href="/static/css/pages/settings.css?v=3.6.121">
 {% endblock %}
 
 {% block content %}
@@ -34,6 +34,7 @@
         <div class="setting-options two-up">
           <label class="switch-option"><input type="checkbox" id="replace_mode" {% if settings.replace_mode %}checked{% endif %}><span class="switch-track"></span><span class="switch-copy"><strong>Replace mode</strong><small>New media replaces the matching quality and removes the older Telegram source post after the new file is indexed. A subtitle replaces only its matching movie/episode and language.</small></span></label>
           <label class="switch-option"><input type="checkbox" id="hide_catalog" {% if settings.hide_catalog %}checked{% endif %}><span class="switch-track"></span><span class="switch-copy"><strong>Hide public catalog</strong><small>Keep catalog browsing private while direct access tokens continue to work.</small></span></label>
+          <label class="switch-option"><input type="checkbox" id="upload_status_messages" {% if settings.upload_status_messages %}checked{% endif %}><span class="switch-track"></span><span class="switch-copy"><strong>Upload status messages</strong><small>Post a compact success, failed, or pending reply for video, split, subtitle, and unsupported uploads. Indexing never waits for these replies.</small></span></label>
         </div>
       </section>
 
@@ -134,5 +135,5 @@
 {% endblock %}
 
 {% block extra_scripts %}
-<script src="/static/js/pages/settings.js?v=3.6.120" defer></script>
+<script src="/static/js/pages/settings.js?v=3.6.121" defer></script>
 {% endblock %}

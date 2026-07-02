@@ -1,4 +1,4 @@
-from asyncio import create_task, sleep as asleep, Queue, Lock
+from asyncio import create_task, Queue, Lock
 import Backend
 from Backend.helper.task_manager import edit_message
 from Backend.logger import LOGGER
@@ -9,7 +9,6 @@ from Backend.helper.metadata import metadata
 from pyrogram import filters, Client
 from pyrogram.types import Message
 from pyrogram.errors import FloodWait
-from pyrogram.enums.parse_mode import ParseMode
 from Backend.helper.metadata import extract_default_id
 from Backend.helper.split_files import (
     detect_split_upload,
@@ -21,6 +20,7 @@ from Backend.helper.split_files import (
 )
 from Backend.helper.subtitle_service import index_subtitle, relink_unmatched_subtitles
 from Backend.helper.subtitle_constants import is_subtitle_file
+from Backend.helper.upload_status import process_upload_statuses, queue_upload_status
 
 
 
@@ -142,161 +142,333 @@ def _is_subtitle_message(message: Message) -> bool:
     )
 
 
-async def _index_subtitle_message(message: Message) -> None:
+def _upload_display_name(message: Message) -> str:
+    """Return the original Telegram filename for upload status replies."""
+    file = message.video or message.document
+    return (getattr(file, "file_name", "") or "Unknown file").strip()
+
+
+def _media_status_context(
+    *,
+    client: Client,
+    message: Message,
+    metadata_info: dict,
+    fallback_title: str,
+    size: str,
+    action: str,
+) -> dict:
+    """Build the compact status only after metadata has been resolved."""
+    del fallback_title, size
+    return {
+        "client": client,
+        "chat_id": int(message.chat.id),
+        "reply_to_message_id": int(message.id),
+        "kind": "SPLIT" if metadata_info.get("group_key") else "VIDEO",
+        "title": _upload_display_name(message),
+        "detail": "",
+        "action": action,
+    }
+
+
+async def _notify_upload_failure(
+    client: Client,
+    message: Message,
+    *,
+    kind: str,
+    action: str,
+    detail: str = "",
+) -> None:
+    await queue_upload_status(
+        client=client,
+        chat_id=int(message.chat.id),
+        reply_to_message_id=int(message.id),
+        kind=kind,
+        state="failed",
+        action=action,
+        title=_upload_display_name(message),
+        detail=detail,
+    )
+
+
+async def _index_subtitle_message(client: Client, message: Message, *, action: str) -> None:
     document = message.document
     channel = int(str(message.chat.id).replace("-100", ""))
-    record = await index_subtitle(
-        db,
-        channel=channel,
-        msg_id=message.id,
-        filename=document.file_name or message.caption or "subtitle.srt",
-        caption=message.caption or "",
-        raw_size=document.file_size or 0,
-        size=get_readable_file_size(document.file_size or 0),
-        mime_type=document.mime_type or "",
+    try:
+        record = await index_subtitle(
+            db,
+            channel=channel,
+            msg_id=message.id,
+            filename=document.file_name or message.caption or "subtitle.srt",
+            caption=message.caption or "",
+            raw_size=document.file_size or 0,
+            size=get_readable_file_size(document.file_size or 0),
+            mime_type=document.mime_type or "",
+        )
+    except Exception as exc:
+        LOGGER.error("Subtitle indexing failed for message %s: %s", message.id, exc, exc_info=True)
+        await _notify_upload_failure(
+            client,
+            message,
+            kind="SUBTITLE",
+            action="Index failed",
+        )
+        return
+
+    status = str(record.get("status") or "unmatched").lower()
+    await queue_upload_status(
+        client=client,
+        chat_id=int(message.chat.id),
+        reply_to_message_id=int(message.id),
+        kind="SUBTITLE",
+        state="success" if status == "matched" else "warning",
+        action=action if status == "matched" else "Indexed · Match pending",
+        title=_upload_display_name(message),
     )
-    LOGGER.info(
-        "Subtitle indexed: %s [%s] → %s",
-        record.get("filename"),
-        record.get("language_code"),
-        record.get("status"),
+
+
+async def _queue_media_index(
+    client: Client,
+    message: Message,
+    *,
+    action: str,
+    override_id: str | None = None,
+) -> bool:
+    """Resolve metadata and queue media work; delivery status follows DB completion."""
+    file = message.video or message.document
+    title = _upload_display_name(message)
+    split_source, split_upload_info = _split_source_info(message)
+    legacy_candidate = _legacy_bare_split_candidate(message)
+    if not split_upload_info:
+        split_source, split_upload_info = await _contextual_legacy_split_for_live_upload(client, message)
+
+    metadata_source = split_source or title
+    msg_id = int(message.id)
+    raw_size = int(file.file_size or 0)
+    size = get_readable_file_size(raw_size)
+    channel = int(str(message.chat.id).replace("-100", ""))
+    metadata_input = metadata_source if split_upload_info else clean_filename(metadata_source)
+    metadata_info = await metadata(metadata_input, channel, msg_id, override_id=override_id)
+
+    status_kind = "SPLIT" if split_upload_info else "VIDEO"
+    if metadata_info is None:
+        LOGGER.warning("Metadata failed for file: %s (ID: %s)", title, msg_id)
+        await _notify_upload_failure(
+            client,
+            message,
+            kind=status_kind,
+            action="Metadata not found",
+            detail=size,
+        )
+        return False
+
+    if legacy_candidate and not split_upload_info:
+        metadata_info["legacy_source_filename"] = legacy_candidate[1]
+
+    title = remove_urls(metadata_source if metadata_info.get("group_key") else title)
+    if not metadata_info.get("group_key"):
+        recovered_split = split_upload_info or find_split_source(title, metadata_source)[1]
+        if recovered_split:
+            metadata_info.update(
+                split_metadata_fields(channel, metadata_info.get("quality"), recovered_split)
+            )
+            LOGGER.info(
+                "[SplitRecovery] live msg %s: %s → part %s",
+                msg_id,
+                title,
+                recovered_split.part_number,
+            )
+
+    if metadata_info.get("group_key"):
+        title = metadata_info.get("media_filename") or strip_part_suffix(title)
+    if not title.lower().endswith((
+        ".mkv", ".mp4", ".avi", ".ts", ".m4v", ".mov", ".wmv", ".webm",
+        ".flv", ".mpeg", ".mpg",
+    )):
+        title += ".mkv"
+
+    status_context = _media_status_context(
+        client=client,
+        message=message,
+        metadata_info=metadata_info,
+        fallback_title=title,
+        size=size,
+        action=action,
     )
+    await file_queue.put(
+        (metadata_info, channel, msg_id, size, raw_size, title, status_context)
+    )
+    return True
+
 
 async def process_file():
     while True:
-        metadata_info, channel, msg_id, size, raw_size, title = await file_queue.get()
-        async with db_lock:
-            updated_id = await db.insert_media(metadata_info, channel=channel, msg_id=msg_id, size=size, raw_size=raw_size, name=title)
-            if updated_id:
-                LOGGER.info(f"{metadata_info['media_type']} updated with ID: {updated_id}")
-                await relink_unmatched_subtitles(db, limit=150)
-            else:
-                LOGGER.info("Update failed due to validation errors.")
-        file_queue.task_done()
+        (
+            metadata_info,
+            channel,
+            msg_id,
+            size,
+            raw_size,
+            title,
+            status_context,
+        ) = await file_queue.get()
+        try:
+            async with db_lock:
+                updated_id = await db.insert_media(
+                    metadata_info,
+                    channel=channel,
+                    msg_id=msg_id,
+                    size=size,
+                    raw_size=raw_size,
+                    name=title,
+                )
 
-for _ in range(1):
-    create_task(process_file())
+            if updated_id:
+                try:
+                    await relink_unmatched_subtitles(db, limit=150)
+                except Exception as exc:
+                    LOGGER.warning("Subtitle relink after message %s failed: %s", msg_id, exc)
+
+                await queue_upload_status(
+                    client=status_context["client"],
+                    chat_id=status_context["chat_id"],
+                    reply_to_message_id=status_context["reply_to_message_id"],
+                    kind=status_context["kind"],
+                    state="success",
+                    action=status_context["action"],
+                    title=status_context["title"],
+                    detail=status_context["detail"],
+                )
+            else:
+                LOGGER.warning("Media update failed due to validation errors for message %s.", msg_id)
+                await queue_upload_status(
+                    client=status_context["client"],
+                    chat_id=status_context["chat_id"],
+                    reply_to_message_id=status_context["reply_to_message_id"],
+                    kind=status_context["kind"],
+                    state="failed",
+                    action="Index failed",
+                    title=status_context["title"],
+                    detail="Validation rejected",
+                )
+        except Exception as exc:
+            LOGGER.error("Media indexing failed for message %s: %s", msg_id, exc, exc_info=True)
+            await queue_upload_status(
+                client=status_context["client"],
+                chat_id=status_context["chat_id"],
+                reply_to_message_id=status_context["reply_to_message_id"],
+                kind=status_context["kind"],
+                state="failed",
+                action="Index failed",
+                title=status_context["title"],
+                detail="Database error",
+            )
+        finally:
+            file_queue.task_done()
+
+
+create_task(process_file())
+create_task(process_upload_statuses())
 
 
 @Client.on_message(filters.channel & (filters.document | filters.video))
 async def file_receive_handler(client: Client, message: Message):
-    if str(message.chat.id) in SettingsManager.current().auth_channels:
-        try:
-            if _is_subtitle_message(message):
-                await _index_subtitle_message(message)
-                return
-            if _is_supported_media(message):
-                file = message.video or message.document
-                title = message.caption or file.file_name
-                split_source, split_upload_info = _split_source_info(message)
-                legacy_candidate = _legacy_bare_split_candidate(message)
-                if not split_upload_info:
-                    split_source, split_upload_info = await _contextual_legacy_split_for_live_upload(client, message)
-                metadata_source = split_source or title
-                msg_id = message.id
-                raw_size = file.file_size or 0
-                size = get_readable_file_size(raw_size)
-                channel = str(message.chat.id).replace("-100", "")
+    if str(message.chat.id) not in SettingsManager.current().auth_channels:
+        return
 
-                metadata_input = metadata_source if split_upload_info else clean_filename(metadata_source)
-                metadata_info = await metadata(metadata_input, int(channel), msg_id)
-                if metadata_info is None:
-                    LOGGER.warning(f"Metadata failed for file: {title} (ID: {msg_id})")
-                    return
-                if legacy_candidate and not split_upload_info:
-                    metadata_info["legacy_source_filename"] = legacy_candidate[1]
+    try:
+        if _is_subtitle_message(message):
+            await _index_subtitle_message(client, message, action="Indexed")
+            return
 
-                title = remove_urls(metadata_source if metadata_info.get('group_key') else title)
-                if not metadata_info.get('group_key'):
-                    recovered_split = split_upload_info or find_split_source(title, metadata_source)[1]
-                    if recovered_split:
-                        metadata_info.update(split_metadata_fields(int(channel), metadata_info.get('quality'), recovered_split))
-                        LOGGER.info("[SplitRecovery] live msg %s: %s → part %s", msg_id, title, recovered_split.part_number)
-                if metadata_info.get('group_key'):
-                    title = metadata_info.get('media_filename') or strip_part_suffix(title)
-                if not title.lower().endswith(('.mkv', '.mp4', '.avi', '.ts', '.m4v', '.mov', '.wmv', '.webm', '.flv', '.mpeg', '.mpg')):
-                    title += '.mkv'
-
-                if Backend.USE_DEFAULT_ID:
-                    new_caption = (message.caption + "\n\n" + Backend.USE_DEFAULT_ID) if message.caption else Backend.USE_DEFAULT_ID
-                    create_task(edit_message(
+        if _is_supported_media(message):
+            indexed = await _queue_media_index(client, message, action="Indexed")
+            if indexed and Backend.USE_DEFAULT_ID:
+                new_caption = (
+                    (message.caption + "\n\n" + Backend.USE_DEFAULT_ID)
+                    if message.caption
+                    else Backend.USE_DEFAULT_ID
+                )
+                create_task(
+                    edit_message(
                         chat_id=message.chat.id,
                         msg_id=message.id,
-                        new_caption=new_caption
-                    ))
-
-                await file_queue.put((metadata_info, int(channel), msg_id, size, raw_size, title))
-            else:
-                file = message.video or message.document
-                LOGGER.info(
-                    "Ignoring unsupported channel upload: name=%r mime=%r message=%s",
-                    getattr(file, "file_name", "") if file else "",
-                    getattr(file, "mime_type", "") if file else "",
-                    message.id,
+                        new_caption=new_caption,
+                    )
                 )
-        except FloodWait as e:
-            LOGGER.info(f"Sleeping for {str(e.value)}s")
-            await asleep(e.value)
-            await message.reply_text(
-                text=f"Got Floodwait of {str(e.value)}s",
-                disable_web_page_preview=True,
-                parse_mode=ParseMode.MARKDOWN
-            )
-    else:
-        await message.reply_text("> Channel is not in AUTH_CHANNEL")
-        
+            return
+
+        file = message.video or message.document
+        await queue_upload_status(
+            client=client,
+            chat_id=int(message.chat.id),
+            reply_to_message_id=int(message.id),
+            kind="FILE",
+            state="skipped",
+            action="Unsupported file",
+            title=_upload_display_name(message),
+        )
+    except FloodWait as exc:
+        LOGGER.warning("Live upload handling hit FloodWait for message %s: %ss", message.id, exc.value)
+        await _notify_upload_failure(
+            client,
+            message,
+            kind="FILE",
+            action="Rate limited",
+            detail=f"Retry in {exc.value}s",
+        )
+    except Exception as exc:
+        LOGGER.error("Error handling generic file %s: %s", message.id, exc, exc_info=True)
+        await _notify_upload_failure(
+            client,
+            message,
+            kind="FILE",
+            action="Processing error",
+        )
+
 
 @Client.on_edited_message(filters.channel & (filters.document | filters.video))
 async def file_edited_handler(client: Client, message: Message):
-    if str(message.chat.id) in SettingsManager.current().auth_channels:
-        try:
-            if _is_subtitle_message(message):
-                await _index_subtitle_message(message)
-                return
-            if _is_supported_media(message):
-                file = message.video or message.document
-                title = message.caption or file.file_name
-                split_source, split_upload_info = _split_source_info(message)
-                legacy_candidate = _legacy_bare_split_candidate(message)
-                if not split_upload_info:
-                    split_source, split_upload_info = await _contextual_legacy_split_for_live_upload(client, message)
-                metadata_source = split_source or title
-                msg_id = message.id
-                raw_size = file.file_size or 0
-                size = get_readable_file_size(raw_size)
-                channel = str(message.chat.id).replace("-100", "")
+    if str(message.chat.id) not in SettingsManager.current().auth_channels:
+        return
 
-                override_id = extract_default_id(message.caption) if message.caption else None
+    try:
+        if _is_subtitle_message(message):
+            await _index_subtitle_message(client, message, action="Updated")
+            return
 
-                if override_id:
-                    LOGGER.info(f"Detected override ID '{override_id}' in edited message {msg_id}")
-                    
-                    await db.remove_media_part(int(channel), msg_id)
+        if not _is_supported_media(message):
+            return
 
-                    metadata_input = metadata_source if split_upload_info else clean_filename(metadata_source)
-                    metadata_info = await metadata(metadata_input, int(channel), msg_id, override_id=override_id)
-                    if metadata_info is None:
-                        LOGGER.warning(f"Metadata failed for edited file: {title} (ID: {msg_id})")
-                        return
-                    if legacy_candidate and not split_upload_info:
-                        metadata_info["legacy_source_filename"] = legacy_candidate[1]
+        override_id = extract_default_id(message.caption) if message.caption else None
+        if not override_id:
+            return
 
-                    title = remove_urls(metadata_source if metadata_info.get('group_key') else title)
-                    if not metadata_info.get('group_key'):
-                        recovered_split = split_upload_info or find_split_source(title, metadata_source)[1]
-                        if recovered_split:
-                            metadata_info.update(split_metadata_fields(int(channel), metadata_info.get('quality'), recovered_split))
-                            LOGGER.info("[SplitRecovery] edited msg %s: %s → part %s", msg_id, title, recovered_split.part_number)
-                    if metadata_info.get('group_key'):
-                        title = metadata_info.get('media_filename') or strip_part_suffix(title)
-                    if not title.lower().endswith(('.mkv', '.mp4', '.avi', '.ts', '.m4v', '.mov', '.wmv', '.webm', '.flv', '.mpeg', '.mpg')):
-                        title += '.mkv'
+        channel = int(str(message.chat.id).replace("-100", ""))
+        await db.remove_media_part(channel, int(message.id))
+        await _queue_media_index(
+            client,
+            message,
+            action="Updated",
+            override_id=override_id,
+        )
+    except FloodWait as exc:
+        LOGGER.warning("Edited upload handling hit FloodWait for message %s: %ss", message.id, exc.value)
+        await _notify_upload_failure(
+            client,
+            message,
+            kind="FILE",
+            action="Rate limited",
+            detail=f"Retry in {exc.value}s",
+        )
+    except Exception as exc:
+        LOGGER.error("Error handling edited generic file %s: %s", message.id, exc, exc_info=True)
+        await _notify_upload_failure(
+            client,
+            message,
+            kind="FILE",
+            action="Update failed",
+        )
 
-                    await file_queue.put((metadata_info, int(channel), msg_id, size, raw_size, title))
-            else:
-                pass
-        except Exception as e:
-            LOGGER.error(f"Error handling edited generic file {message.id}: {e}")
 
 @Client.on_deleted_messages(filters.channel)
 async def file_deleted_handler(client: Client, messages: list[Message]):

@@ -1116,7 +1116,10 @@ async def update_settings_api(payload: dict) -> dict:
             preserved.append(key)
 
     # ── Type coercion & validation ────────────────────────────────────────────
-    bool_keys = {"replace_mode", "hide_catalog", "subscription", "show_proxy_and_non_proxy_both"}
+    bool_keys = {
+        "replace_mode", "hide_catalog", "subscription",
+        "show_proxy_and_non_proxy_both", "upload_status_messages",
+    }
     for key in bool_keys:
         if key in payload:
             payload[key] = bool(payload[key])
