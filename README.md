@@ -48,6 +48,7 @@ pinned: false
   * [🎥 Updating CAMRip or Low-Quality Files](#-updating-camrip-or-low-quality-files)
   * [🏷️ Fixing Incorrect Metadata](#️-fixing-incorrect-metadata-manual-override)
   * [🎞️ Subtitle Support](#️-subtitle-support)
+  * [📩 Owner-PM Upload Status](#-owner-pm-upload-status)
   * [⚙️ Behind the Scenes](#behind-the-scenes)
 
 * [🖥️ Web Panel](#️-web-panel)
@@ -97,6 +98,7 @@ This project is a **next-generation Telegram Stremio Media Server** that allows 
 - 🌐 **Built-in Addon Proxy Support**
 - 🔍 **Global Search Across Selected Channels**
 - 🔤 **Subtitle Indexing & Stremio Subtitle Resource**
+- 📩 **Owner-PM Upload Status** — compact file processing status sent privately to the configured owner
 - 🛠️ **Tools Page** — channel scan, DB integrity check, dead-link purge, speed test
 - 📊 **Stream Analytics Dashboard**
 - 🌍 **Public Server Status Page**
@@ -219,6 +221,36 @@ The bot automatically indexes subtitle files (`.srt`, `.vtt`, `.ass`, `.ssa`, `.
 - **Language detection**: Language is parsed from the filename or caption. Unrecognised files default to Sinhala (`si`).
 - **Stremio integration**: Subtitles are served via the `/stremio/{token}/subtitles/` resource so any Stremio-compatible client can fetch them automatically.
 - **Subtitle management**: The **Subtitles** page in the web panel lets you view, search, relink unmatched subtitles, and manage them manually.
+
+---
+
+### 📩 Owner-PM Upload Status
+
+After a video, split-file part, subtitle, or unsupported document is processed, the bot can send a one-line status **only to the configured `OWNER_ID` in the bot private chat**.
+
+- Nothing is posted or replied to in the source media channel.
+- The message always uses the original Telegram **file name** — not the caption or matched title.
+- It uses a background queue, so indexing and metadata matching do not wait for the Telegram PM.
+- Normal upload results are not written as server log lines for this feature.
+
+**Status format:**
+
+```text
+✅ Video : filename.mkv
+✅ Split : filename.zip.001
+✅ Subtitle : filename.srt
+⚠️ Sub pending : filename.srt
+❌ Metadata/index : filename.mkv
+⏭️ skipped : filename.txt
+```
+
+**Setup:**
+
+1. Set your numeric Telegram user ID as `OWNER_ID` in `config.env`.
+2. Open the bot once from that owner account and press **Start**, so Telegram allows the bot to send private messages.
+3. In the Web Panel, open **Settings → Library behavior** and keep **Upload status messages** enabled. It is enabled by default.
+
+> During a large batch, PMs can arrive slightly after the file is processed because they are delivered in order at a safe rate. File indexing continues normally.
 
 ---
 
