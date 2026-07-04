@@ -5,7 +5,7 @@ from Backend.logger import LOGGER
 from Backend import db
 from Backend.helper.settings_manager import SettingsManager
 from Backend.helper.pyro import clean_filename, get_readable_file_size, remove_urls
-from Backend.helper.metadata import metadata
+from Backend.helper.metadata import metadata_from_caption_or_filename
 from pyrogram import filters, Client
 from pyrogram.types import Message
 from pyrogram.errors import FloodWait
@@ -17,6 +17,7 @@ from Backend.helper.split_files import (
     find_legacy_bare_split_source,
     resolve_legacy_bare_split_candidates,
     split_metadata_fields,
+    is_video_filename,
 )
 from Backend.helper.subtitle_service import index_subtitle, relink_unmatched_subtitles
 from Backend.helper.subtitle_constants import is_subtitle_file
@@ -33,10 +34,10 @@ def _split_source_info(message: Message):
     file = message.video or message.document
     filename = getattr(file, "file_name", "") or ""
     source, info = find_split_source(
-        filename,
         message.caption or "",
-        clean_filename(filename),
+        filename,
         clean_filename(message.caption or ""),
+        clean_filename(filename),
     )
     if info:
         return source, info
@@ -70,10 +71,10 @@ def _legacy_bare_split_candidate(message: Message):
     filename = getattr(file, "file_name", "") or ""
     caption = message.caption or ""
     source, info = find_legacy_bare_split_source(
-        filename,
         caption,
-        clean_filename(filename),
+        filename,
         clean_filename(caption),
+        clean_filename(filename),
     )
     return (message_id, source, info) if source and info else None
 
@@ -125,8 +126,14 @@ def _is_supported_media(message: Message) -> bool:
     if message.video:
         return True
     if message.document:
+        filename = message.document.file_name or ""
+        caption = message.caption or ""
         mime_type = (message.document.mime_type or "").lower()
         if mime_type.startswith("video/"):
+            return True
+        # Captions are deliberately checked before document names. This also
+        # supports clients that upload normal video files as octet-stream.
+        if is_video_filename(caption) or is_video_filename(filename):
             return True
         # `.mkv.zip.001` volumes normally arrive as application/zip or octet-stream.
         return _split_source_info(message)[1] is not None
@@ -136,9 +143,12 @@ def _is_supported_media(message: Message) -> bool:
 def _is_subtitle_message(message: Message) -> bool:
     if not message.document or message.video:
         return False
-    return is_subtitle_file(
-        message.document.file_name or message.caption or "",
-        message.document.mime_type or "",
+    mime_type = message.document.mime_type or ""
+    # Caption first, then filename fallback. MIME type remains authoritative
+    # for subtitle documents whose captions omit the extension.
+    return is_subtitle_file(message.caption or "", mime_type) or is_subtitle_file(
+        message.document.file_name or "",
+        mime_type,
     )
 
 
@@ -246,8 +256,14 @@ async def _queue_media_index(
     raw_size = int(file.file_size or 0)
     size = get_readable_file_size(raw_size)
     channel = int(str(message.chat.id).replace("-100", ""))
-    metadata_input = metadata_source if split_upload_info else clean_filename(metadata_source)
-    metadata_info = await metadata(metadata_input, channel, msg_id, override_id=override_id)
+    metadata_info = await metadata_from_caption_or_filename(
+        caption=message.caption or "",
+        filename=metadata_source,
+        channel=channel,
+        msg_id=msg_id,
+        override_id=override_id,
+        split_info_override=split_upload_info,
+    )
 
     status_kind = "SPLIT" if split_upload_info else "VIDEO"
     if metadata_info is None:
@@ -266,7 +282,11 @@ async def _queue_media_index(
 
     title = remove_urls(metadata_source if metadata_info.get("group_key") else title)
     if not metadata_info.get("group_key"):
-        recovered_split = split_upload_info or find_split_source(title, metadata_source)[1]
+        recovered_split = split_upload_info or find_split_source(
+            message.caption or "",
+            title,
+            metadata_source,
+        )[1]
         if recovered_split:
             metadata_info.update(
                 split_metadata_fields(channel, metadata_info.get("quality"), recovered_split)
@@ -439,9 +459,10 @@ async def file_edited_handler(client: Client, message: Message):
         if not _is_supported_media(message):
             return
 
+        # Caption edits can repair a title even without an IMDb/TMDb ID.
+        # Re-run the same caption-first → filename-fallback resolver for every
+        # supported media edit; an explicit ID remains an optional override.
         override_id = extract_default_id(message.caption) if message.caption else None
-        if not override_id:
-            return
 
         channel = int(str(message.chat.id).replace("-100", ""))
         await db.remove_media_part(channel, int(message.id))

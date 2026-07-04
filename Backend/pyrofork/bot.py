@@ -1,5 +1,8 @@
 from pyrogram import Client
 from Backend.config import Telegram
+from Backend.helper.telegram_sessions import install_safe_session_restart_handler
+
+install_safe_session_restart_handler()
 
 StreamBot = Client(
     name='bot',

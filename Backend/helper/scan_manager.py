@@ -8,7 +8,7 @@ from pyrogram.errors import FloodWait, ChannelPrivate, ChatAdminRequired
 
 from Backend.logger import LOGGER
 from Backend.helper.encrypt import encode_string, decode_string
-from Backend.helper.metadata import metadata
+from Backend.helper.metadata import metadata_from_caption_or_filename
 from Backend.helper.pyro import clean_filename, get_readable_file_size, remove_urls
 from Backend.helper.subtitle_service import index_subtitle, relink_unmatched_subtitles
 from Backend.helper.subtitle_constants import is_subtitle_file
@@ -19,6 +19,7 @@ from Backend.helper.split_files import (
     find_legacy_bare_split_source,
     resolve_legacy_bare_split_candidates,
     split_metadata_fields,
+    is_video_filename,
 )
 
 
@@ -764,13 +765,11 @@ class ScanManager:
             return None
         raw_file_name = getattr(file, "file_name", "") or ""
         caption = getattr(message, "caption", "") or ""
-        title = caption or raw_file_name
         source, info = find_legacy_bare_split_source(
-            raw_file_name,
             caption,
-            title,
-            clean_filename(raw_file_name),
+            raw_file_name,
             clean_filename(caption),
+            clean_filename(raw_file_name),
         )
         return (message_id, source, info) if source and info else None
 
@@ -892,9 +891,9 @@ class ScanManager:
             state = self.state
             scope = self._normalise_scope(state.get("content_scope"))
 
-            if message.document and is_subtitle_file(
-                message.document.file_name or message.caption or "",
-                message.document.mime_type or "",
+            if message.document and (
+                is_subtitle_file(message.caption or "", message.document.mime_type or "")
+                or is_subtitle_file(message.document.file_name or "", message.document.mime_type or "")
             ):
                 if scope == "media":
                     return
@@ -943,18 +942,18 @@ class ScanManager:
             file = message.video or message.document
             raw_file_name = getattr(file, "file_name", "") or ""
             caption = message.caption or ""
-            title = caption or raw_file_name or "video.mkv"
+            # Keep the real Telegram filename for the downloadable stream; the
+            # caption is used only for metadata lookup and is always tried first.
+            title = raw_file_name or caption or "video.mkv"
             file_name = raw_file_name or title
             if split_override:
                 split_source, split_info = split_override
             else:
                 split_source, split_info = find_split_source(
-                    raw_file_name,
                     caption,
-                    file_name,
-                    title,
-                    clean_filename(raw_file_name),
+                    raw_file_name,
                     clean_filename(caption),
+                    clean_filename(raw_file_name),
                 )
 
             # Full rescans used to rely only on filename matching.  Reuse the
@@ -970,8 +969,14 @@ class ScanManager:
             if message.document and not is_video:
                 mime_type = document_mime
                 # Split ZIP chunks are usually application/zip or octet-stream,
-                # not video/*, so the filename detector is equally authoritative.
-                is_video_document = mime_type.startswith("video/") or bool(split_info)
+                # not video/*. A valid video extension in the caption is checked
+                # before the filename for the same reason as live uploads.
+                is_video_document = (
+                    mime_type.startswith("video/")
+                    or bool(split_info)
+                    or is_video_filename(caption)
+                    or is_video_filename(raw_file_name)
+                )
 
             if not (is_video or is_video_document):
                 if scope != "subtitles":
@@ -980,7 +985,7 @@ class ScanManager:
             if scope == "subtitles":
                 return
 
-            metadata_source = split_source or (file_name if split_info else title)
+            metadata_source = split_source or file_name
             msg_id = message.id
             raw_size = getattr(file, "file_size", 0) or 0
             size = get_readable_file_size(raw_size)
@@ -994,14 +999,14 @@ class ScanManager:
                 LOGGER.warning(f"[ScanManager] Duplicate check error msg {msg_id}: {exc}")
 
             try:
-                # Keep the original split volume name for metadata parsing. Besides
-                # preserving the part suffix, this keeps the live-upload and rescan
-                # group keys identical when filename cleanup removes codec tags.
-                metadata_input = metadata_source if split_info else clean_filename(metadata_source)
-                metadata_info = await metadata(
-                    metadata_input,
-                    channel_int,
-                    msg_id,
+                # The caption is always resolved first. The physical filename is
+                # retained for stream grouping, quality fallback, and the retry
+                # only when caption metadata cannot be found.
+                metadata_info = await metadata_from_caption_or_filename(
+                    caption=caption,
+                    filename=metadata_source,
+                    channel=channel_int,
+                    msg_id=msg_id,
                     split_info_override=split_info,
                 )
             except Exception as exc:
@@ -1019,11 +1024,11 @@ class ScanManager:
             if not metadata_info.get("group_key"):
                 extension_suffix = "" if title_clean.lower().endswith((".mkv", ".mp4", ".avi", ".ts", ".m4v", ".mov", ".wmv", ".webm", ".flv", ".mpeg", ".mpg")) else ".mkv"
                 _, recovered_split = find_split_source(
+                    caption,
                     title_clean,
                     f"{title_clean}{extension_suffix}",
                     file_name,
                     raw_file_name,
-                    caption,
                 )
                 if recovered_split:
                     metadata_info.update(split_metadata_fields(

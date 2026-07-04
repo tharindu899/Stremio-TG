@@ -2,16 +2,16 @@ import pytz
 from logging import getLogger, FileHandler, StreamHandler, INFO, ERROR, Formatter, basicConfig
 from datetime import datetime
 
-IST = pytz.timezone("Asia/Kolkata")
+SLST = pytz.timezone("Asia/Colombo")
 
-class ISTFormatter(Formatter):
+class SLSTFormatter(Formatter):
     def formatTime(self, record, datefmt=None):
-        dt = datetime.fromtimestamp(record.created, IST)
+        dt = datetime.fromtimestamp(record.created, SLST)
         return dt.strftime(datefmt or "%d-%b-%y %I:%M:%S %p")
 
 file_handler = FileHandler("log.txt")
 stream_handler = StreamHandler()
-formatter = ISTFormatter("[%(asctime)s] [%(levelname)s] - %(message)s", "%d-%b-%y %I:%M:%S %p")
+formatter = SLSTFormatter("[%(asctime)s] [%(levelname)s] - %(message)s", "%d-%b-%y %I:%M:%S %p")
 file_handler.setFormatter(formatter)
 stream_handler.setFormatter(formatter)
 
@@ -22,10 +22,19 @@ basicConfig(
 
 getLogger("httpx").setLevel(ERROR)
 getLogger("pyrogram").setLevel(ERROR)
+# Pyrogram/PyroFork emits a warning for an already-closed session socket.
+# The application handles client disconnects itself, so avoid flooding logs.
+for _name in (
+    "pyrogram.session",
+    "pyrogram.session.session",
+    "pyrogram.connection",
+    "pyrofork",
+):
+    getLogger(_name).setLevel(ERROR)
 getLogger("fastapi").setLevel(ERROR)
 
 
 LOGGER = getLogger(__name__)
 LOGGER.setLevel(INFO)
 
-LOGGER.info("Logger initialized with IST timezone.")
+LOGGER.info("Logger initialized with SLST timezone.")

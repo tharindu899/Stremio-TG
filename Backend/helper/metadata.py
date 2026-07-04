@@ -996,6 +996,103 @@ _RELEASE_TAG_TECHNICAL_RE = re.compile(
     r"(?ix)\b(?:v\d+|\d{3,4}p|web[ ._-]?(?:dl|rip)|blu[ ._-]?ray|b[dr]rip|hdrip|remux|dvdrip|x26[45]|h[ ._-]?26[45]|hevc|av1|aac|ddp?|dts|truehd|flac|multi|dual|10bit|8bit)\b"
 )
 
+# PTN occasionally infers S01E01 from incomplete audio/release tails such as
+# ``... - x264 - (DD+``. A title is only treated as a regular TV episode when
+# the filename itself contains a real season/episode marker. Bare-number anime
+# releases are handled separately by ``_release_episode_parts`` below.
+_EXPLICIT_EPISODE_MARKER_RE = re.compile(
+    r"""(?ix)
+    (?:
+        \bS(?:eason)?\s*0*\d{1,3}\s*[-_. ]*E(?:pisode)?\s*0*\d{1,4}\b
+        |\b\d{1,3}\s*[xX]\s*\d{1,4}\b
+        |\bseason\s*\d{1,3}\s*(?:episode|ep)\s*\d{1,4}\b
+        |\b(?:episode|ep)\s*\d{1,4}\b
+    )
+    """
+)
+
+# A standalone release year is a strong movie signal when a caption/filename
+# has no real season/episode marker.  This protects movie captions such as
+# ``Karakkam (2026) Malayalam`` from parser-generated ``S01E01`` values.
+# Explicit episode tags always win, so ``Show (2026) S01E01`` remains TV.
+_RELEASE_YEAR_RE = re.compile(r"(?<!\d)((?:19|20)\d{2})(?!\d)")
+
+# Release labels that never belong to a movie/series title when they appear at
+# the end of the pre-codec filename segment. This is used only after a parser
+# episode result has been rejected as unverified.
+_RELEASE_TITLE_BOUNDARY_RE = re.compile(
+    r"""(?ix)
+    (?:^|[\s._-])
+    (?:
+        \d{3,4}p|web[ ._-]?(?:dl|rip)|blu[ ._-]?ray|b[dr]rip|hdrip|
+        remux|dvdrip|hdtv|x26[45]|h[ ._-]?26[45]|hevc|av1|aac|ddp?|dts|
+        truehd|flac|atmos|eac3|esub|webmux
+    )\b
+    """
+)
+_RELEASE_TITLE_TRAILING_LABEL_RE = re.compile(
+    r"""(?ix)
+    (?:[\s._-]+(?:
+        arabic|bangla|bengali|chinese|english|french|german|hindi|italian|
+        japanese|kannada|korean|malayalam|polish|portuguese|russian|sinhala|
+        spanish|tamil|telugu|turkish|urdu|hq|proper|internal|multi|dual|
+        dubbed|sub(?:title)?s?|esub
+    ))+\s*$
+    """
+)
+
+
+def _has_explicit_episode_marker(filename: str) -> bool:
+    raw = re.sub(
+        r"(?i)\.(?:mkv|mp4|avi|ts|m4v|mov|wmv|webm|flv|mpeg|mpg)$",
+        "",
+        str(filename or ""),
+    )
+    return bool(_EXPLICIT_EPISODE_MARKER_RE.search(raw))
+
+
+def _release_year_from_source(value: str) -> Optional[int]:
+    """Extract a plausible standalone release year from a caption/filename."""
+    for match in _RELEASE_YEAR_RE.finditer(str(value or "")):
+        try:
+            year = int(match.group(1))
+        except (TypeError, ValueError):
+            continue
+        if 1900 <= year <= 2099:
+            return year
+    return None
+
+
+def _release_title_candidate(filename: str, fallback: str | None, year: Optional[int]) -> str:
+    """Recover a clean provider-search title after an unverified PTN episode.
+
+    The original parsed title is preserved as the fallback. The release prefix
+    is trimmed only at an unmistakable technical boundary, then trailing
+    language/source labels and the detected bracketed year are removed.
+    """
+    raw = re.sub(
+        r"(?i)\.(?:mkv|mp4|avi|ts|m4v|mov|wmv|webm|flv|mpeg|mpg)$",
+        "",
+        str(filename or ""),
+    )
+    boundary = _RELEASE_TITLE_BOUNDARY_RE.search(raw)
+    if boundary:
+        raw = raw[:boundary.start()]
+
+    if year:
+        raw = re.sub(
+            rf"[\(\[]\s*{re.escape(str(year))}\s*[\)\]]",
+            " ",
+            raw,
+            count=1,
+        )
+
+    raw = raw.replace("_", " ").replace(".", " ")
+    raw = _RELEASE_TITLE_TRAILING_LABEL_RE.sub("", raw)
+    raw = re.sub(r"[\[\]{}()]", " ", raw)
+    raw = re.sub(r"\s+", " ", raw).strip(" .-_–—")
+    return raw or str(fallback or "").strip()
+
 
 def _trim_release_episode_tail(value: str) -> str:
     """Remove only technical suffixes from an episode-name tail."""
@@ -1039,6 +1136,9 @@ def _release_episode_parts(filename: str, parsed: dict) -> tuple[Optional[str], 
         return None, None, None
 
     tail = raw[match.end():].strip()
+    # ``Movie - 1 (2026)`` is a common title/year form, not an episode.
+    if re.match(r"^\(\s*(?:19|20)\d{2}\s*\)", tail):
+        return None, None, None
     episode_title = None
     if tail.startswith(("-", "–", "—")):
         episode_title = _trim_release_episode_tail(tail[1:]) or None
@@ -1110,6 +1210,97 @@ def _map_absolute_episode(imdb_tv: dict | None, absolute_episode: Optional[int],
 
 
 # =============================================================================
+# Metadata source selection
+# =============================================================================
+
+_METADATA_URL_RE = re.compile(r"(?i)\b(?:https?|ftp)://[^\s]+")
+_METADATA_ONLY_ID_RE = re.compile(r"(?i)\btt\d{7,10}\b")
+
+
+def _clean_metadata_candidate(value: object) -> str:
+    """Return usable caption/filename text for metadata parsing.
+
+    Telegram captions often include links, upload notes, or line breaks around
+    the release name.  Remove only URL noise and normalize whitespace here;
+    PTN still receives the original release wording, language, and tags.
+    """
+    text = _METADATA_URL_RE.sub(" ", str(value or ""))
+    text = re.sub(r"[\r\n\t]+", " ", text)
+    text = re.sub(r"\s+", " ", text).strip(" `\"'")
+    if not text:
+        return ""
+
+    # A caption consisting only of an IMDb/default-ID marker has no searchable
+    # title. Let the filename supply the title while metadata() still receives
+    # the ID as a fallback signal when a real caption contains both values.
+    meaningful = _METADATA_ONLY_ID_RE.sub("", text)
+    meaningful = re.sub(r"(?i)\b(?:imdb|tmdb|default|media|id|sub)\b", "", meaningful)
+    meaningful = re.sub(r"[^\w]+", "", meaningful, flags=re.UNICODE)
+    return text if len(meaningful) >= 2 else ""
+
+
+def metadata_source_candidates(caption: object, filename: object) -> list[tuple[str, str]]:
+    """Return caption-first metadata candidates with a filename fallback.
+
+    The returned order is intentionally strict: no filename parsing occurs
+    until the caption candidate has failed provider resolution.  Duplicate text
+    is removed so a caption identical to the filename is never queried twice.
+    """
+    caption_source = _clean_metadata_candidate(caption)
+    filename_source = _clean_metadata_candidate(filename)
+    candidates: list[tuple[str, str]] = []
+    if caption_source:
+        candidates.append(("caption", caption_source))
+    if filename_source and filename_source.casefold() != caption_source.casefold():
+        candidates.append(("filename", filename_source))
+    return candidates
+
+
+async def metadata_from_caption_or_filename(
+    *,
+    caption: object,
+    filename: object,
+    channel: int,
+    msg_id,
+    override_id: str | None = None,
+    split_info_override: SplitFileInfo | None = None,
+) -> dict | None:
+    """Resolve media metadata from caption first, then filename.
+
+    ``filename`` remains the actual Telegram file/split member used for stream
+    grouping and quality fallback.  Captions only control the title/episode
+    metadata lookup, so a successful caption match never changes the file that
+    Stremio streams.
+    """
+    candidates = metadata_source_candidates(caption, filename)
+    for source_kind, source in candidates:
+        result = await metadata(
+            str(filename or source),
+            channel,
+            msg_id,
+            override_id=override_id,
+            split_info_override=split_info_override,
+            match_source=source,
+            quality_source=str(filename or source),
+        )
+        if result is not None:
+            result["metadata_source"] = source_kind
+            LOGGER.info(
+                "Metadata resolved from %s for message %s: %s",
+                source_kind,
+                msg_id,
+                source,
+            )
+            return result
+        if source_kind == "caption":
+            LOGGER.info(
+                "Caption metadata did not resolve for message %s; falling back to filename.",
+                msg_id,
+            )
+    return None
+
+
+# =============================================================================
 # Main entry-point
 # =============================================================================
 
@@ -1119,12 +1310,17 @@ async def metadata(
     msg_id,
     override_id: str = None,
     split_info_override: SplitFileInfo | None = None,
+    *,
+    match_source: str | None = None,
+    quality_source: str | None = None,
 ) -> dict | None:
     # Detect raw split videos and split ZIP archives before PTN parsing. PTN
     # only receives the clean original video filename, never `part001` or
     # `.zip.001`, so metadata matching stays identical to a normal upload.
     split_info = split_info_override or detect_split_file(filename)
     metadata_filename = split_info.media_filename if split_info else filename
+    parse_source = str(match_source or metadata_filename or "").strip()
+    quality_fallback_source = str(quality_source or metadata_filename or "").strip()
     if split_info:
         LOGGER.info(
             "Split %s detected: %s → part %s (media: %s)",
@@ -1135,7 +1331,7 @@ async def metadata(
         )
 
     try:
-        parsed = PTN.parse(metadata_filename)
+        parsed = PTN.parse(parse_source)
     except Exception as e:
         LOGGER.error(f"PTN parsing failed for {filename}: {e}\n{traceback.format_exc()}")
         return None
@@ -1151,14 +1347,17 @@ async def metadata(
     title = parsed.get("title")
     season = parsed.get("season")
     episode = parsed.get("episode")
-    year = parsed.get("year")
+    # Some PTN versions do not return a parenthesized release year.  Retain
+    # it from the original caption/filename so year-tagged movie releases can
+    # be classified consistently across live uploads and full rescans.
+    year = parsed.get("year") or _release_year_from_source(parse_source)
     quality = parsed.get("resolution")
 
     if isinstance(season, list) or isinstance(episode, list):
         LOGGER.warning(f"Invalid season/episode format for {filename}: {parsed}")
         return None
 
-    recovered_title, recovered_episode, recovered_episode_title = _release_episode_parts(metadata_filename, parsed)
+    recovered_title, recovered_episode, recovered_episode_title = _release_episode_parts(parse_source, parsed)
     # PTN can strip a technical tail but leave ``Series - 1101`` inside its
     # title field. Retry that cleaned title so live uploads cannot fall through
     # to a movie lookup and trigger Replace Mode on unrelated episodes.
@@ -1167,11 +1366,42 @@ async def metadata(
             str(parsed.get("title") or ""),
             parsed,
         )
+
+    parsed_episode = season is not None or episode is not None
+    has_explicit_episode = _has_explicit_episode_marker(parse_source)
+    source_year = _release_year_from_source(parse_source)
+
+    # Caption-first metadata must never invent an episode for an ordinary movie
+    # release.  A release year with no true S/E marker is movie metadata, even
+    # when a parser incorrectly supplies S01E01.  We also discard a bogus bare
+    # episode recovery here so it cannot restore TV mode a few lines below.
+    if source_year and not has_explicit_episode:
+        if parsed_episode or recovered_episode is not None:
+            LOGGER.info(
+                "Treating year-tagged non-episode release as a movie: %s",
+                parse_source,
+            )
+        season = None
+        episode = None
+        recovered_episode = None
+        recovered_episode_title = None
+        title = _release_title_candidate(parse_source, title, year or source_year)
+    elif parsed_episode and not has_explicit_episode and recovered_episode is None:
+        # Do not accept PTN's synthetic S01E01 for malformed audio/codec tails.
+        # Search the original release prefix as a movie instead.
+        LOGGER.info(
+            "Ignoring unverified PTN episode parse for %s; treating it as a movie release.",
+            filename,
+        )
+        season = None
+        episode = None
+        title = _release_title_candidate(parse_source, title, year)
+
     episode_title_hint = parsed.get("episodeName") or recovered_episode_title
     absolute_episode = None
 
     # Fansub/anime releases frequently use absolute numbering (e.g. `- 417`)
-    # with no SxxExx marker.  Treat them as TV episodes and resolve the real
+    # with no SxxExx marker. Treat them as TV episodes and resolve the real
     # provider season/episode pair later, after the series metadata is known.
     if not season and recovered_episode is not None:
         title = recovered_title or title
@@ -1185,9 +1415,14 @@ async def metadata(
     if season and not episode:
         LOGGER.warning(f"Missing episode in {filename}: {parsed}")
         return None
+    if not quality and quality_fallback_source and quality_fallback_source != parse_source:
+        try:
+            quality = PTN.parse(quality_fallback_source).get("resolution")
+        except Exception:
+            quality = None
     if not quality:
         quality = "Unknown"
-        LOGGER.info("No resolution in %s — indexing with Unknown quality.", filename)
+        LOGGER.info("No resolution in %s — indexing with Unknown quality.", parse_source or filename)
     if not title:
         LOGGER.info(f"No title parsed from: {filename} (parsed={parsed})")
         return None
@@ -1208,7 +1443,7 @@ async def metadata(
 
     if not default_id:
         try:
-            default_id = extract_default_id(filename)
+            default_id = extract_default_id(match_source or filename)
         except Exception:
             pass
 

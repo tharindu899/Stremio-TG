@@ -3,6 +3,7 @@ import asyncio
 import logging
 from traceback import format_exc
 from pyrogram import idle
+from pyrogram.errors import AuthKeyUnregistered, SessionRevoked, Unauthorized
 from Backend import __version__, db
 from Backend.helper.pinger import ping
 from Backend.logger import LOGGER
@@ -14,6 +15,7 @@ from Backend.pyrofork.clients import initialize_clients
 from Backend.helper import subscription_task_manager
 from Backend.helper.scan_manager import scan_manager, dbcheck_manager
 from Backend.helper.link_checker import DeadLinkChecker
+from Backend.helper.telegram_sessions import mark_userbot_session_invalid
 from Backend.fastapi.main import app
 from Backend.helper.auto_catalog import (
     start_auto_catalog_sync_background, start_auto_catalog_interval_loop
@@ -52,9 +54,18 @@ async def start_services():
         await asleep(1.2)
 
         if Userbot is not None:
-            await Userbot.start()
-            Userbot.username = Userbot.me.username
-            LOGGER.info(f"Userbot Client : [@{Userbot.username}] (Global Search / fallback enabled)")
+            try:
+                await Userbot.start()
+                Userbot.username = Userbot.me.username
+                LOGGER.info(f"Userbot Client : [@{Userbot.username}] (Global Search / fallback enabled)")
+            except (Unauthorized, AuthKeyUnregistered, SessionRevoked) as exc:
+                # The Userbot is optional. A stale session must never prevent
+                # local catalogs, indexing, or regular Telegram streaming.
+                mark_userbot_session_invalid(Userbot, exc)
+                LOGGER.warning(
+                    "Userbot startup skipped because its session is invalid. "
+                    "Update USER_SESSION_STRING to restore Global Search."
+                )
         else:
             LOGGER.info("Userbot not configured (USER_SESSION_STRING empty) — running with StreamBot only.")
         await asleep(1.2)
@@ -98,7 +109,11 @@ async def stop_services():
 
         await StreamBot.stop()
         if Userbot is not None:
-            await Userbot.stop()
+            try:
+                await Userbot.stop()
+            except Exception:
+                # A rejected Userbot start leaves no active session to stop.
+                pass
 
         await db.disconnect()
         

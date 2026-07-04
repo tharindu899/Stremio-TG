@@ -16,6 +16,7 @@ from pyrogram.errors import (
 
 from Backend.logger import LOGGER
 from Backend.pyrofork.bot import StreamBot, Userbot
+from Backend.helper.telegram_sessions import mark_userbot_session_invalid, userbot_is_usable
 
 DELETE_BATCH_SIZE = 10
 _FALLBACK_WORTHY = (
@@ -32,7 +33,7 @@ _userbot_session_dead = False
 
 
 def _userbot_usable() -> bool:
-    return Userbot is not None and not _userbot_session_dead
+    return userbot_is_usable(Userbot) and not _userbot_session_dead
 
 
 async def edit_message(chat_id: int, msg_id: int, new_caption: str): 
@@ -72,6 +73,7 @@ async def _userbot_edit(chat_id: int, msg_id: int, new_caption: str):
             LOGGER.error(f"[USERBOT] Retry after FloodWait failed while editing {msg_id} in {chat_id}: {e2}")
     except _SESSION_DEAD as e:
         _userbot_session_dead = True
+        mark_userbot_session_invalid(Userbot, e)
         LOGGER.error(f"[USERBOT] Session invalid ({type(e).__name__}): {e}. Disabling Userbot fallback for this run.")
     except Exception as e:
         LOGGER.error(f"[USERBOT] Error while editing message {msg_id} in {chat_id}: {e}")
@@ -123,6 +125,7 @@ async def _delete_chunk(client, client_label: str, chat_id: int, msg_ids: List[i
     except _SESSION_DEAD as e:
         if client_label == "Userbot":
             _userbot_session_dead = True
+            mark_userbot_session_invalid(client, e)
         LOGGER.error(f"[{client_label.upper()}] Session invalid ({type(e).__name__}): {e}")
         return msg_ids
     except _FALLBACK_WORTHY as e:

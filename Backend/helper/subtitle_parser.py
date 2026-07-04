@@ -277,9 +277,10 @@ def parse_subtitle_identity(filename: str, caption: str = "") -> SubtitleIdentit
     """Extract language and media hints from a subtitle document.
 
     Explicit tags are preferred: ``[SUB:tt1234567 si]`` and
-    ``[SUB:tt1234567 S01E02 Sinhala]``. Filename-based matching is used when
-    no explicit tag is present. Unlabelled subtitles default to Sinhala only
-    after all filename and caption language checks fail.
+    ``[SUB:tt1234567 S01E02 Sinhala]``. Caption metadata is always checked
+    before filename metadata; the filename is used only when the caption does
+    not provide that specific detail. Unlabelled subtitles default to Sinhala
+    only after both caption and filename language checks fail.
     """
     source_filename = (filename or "").strip()
     source_caption = (caption or "").strip()
@@ -307,10 +308,17 @@ def parse_subtitle_identity(filename: str, caption: str = "") -> SubtitleIdentit
         if imdb_id or tmdb_id:
             hint = "embedded_id"
 
-    season, episode = _season_episode(f"{explicit_tail} {combined}")
+    # Caption is authoritative for episode matching. Only fall back to the
+    # document filename when the caption has no season/episode marker.
+    season, episode = _season_episode(f"{explicit_tail} {source_caption}")
+    if season is None or episode is None:
+        season, episode = _season_episode(source_filename)
+
     language_code = normalize_language(explicit_tail) if explicit_tail else "und"
     if language_code == "und":
-        language_code = detect_language(explicit_tail, source_caption, source_filename)
+        language_code = detect_language(explicit_tail, source_caption)
+    if language_code == "und":
+        language_code = detect_language(source_filename)
     # Use Sinhala only as the final fallback. Explicit language labels found in
     # the tag, caption, or filename always take priority.
     if language_code == "und":
@@ -320,16 +328,20 @@ def parse_subtitle_identity(filename: str, caption: str = "") -> SubtitleIdentit
     # as ``29 (2026).srt`` be linked safely without opening fuzzy matching to
     # unrelated one-word releases.
     release_year = None
-    for year_source in (source_filename, source_caption):
+    for year_source in (source_caption, source_filename):
         year_match = _YEAR.search(year_source or "")
         if year_match:
             release_year = int(year_match.group(1))
             break
 
-    name_without_extension = str(PurePath(source_filename).with_suffix("")) if source_filename else source_caption
-    title = _strip_title_noise(name_without_extension, language_code)
-    if not title:
-        title = _strip_title_noise(source_caption, language_code)
+    caption_title = _strip_title_noise(source_caption, language_code)
+    filename_without_extension = (
+        str(PurePath(source_filename).with_suffix("")) if source_filename else ""
+    )
+    filename_title = _strip_title_noise(filename_without_extension, language_code)
+    title = caption_title or filename_title
+    if caption_title and hint == "filename":
+        hint = "caption"
 
     return SubtitleIdentity(
         source_filename=source_filename or "subtitle" + extension_from_filename(source_caption),

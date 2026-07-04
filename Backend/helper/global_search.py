@@ -19,6 +19,7 @@ from pyrogram.errors import (
 from Backend.logger import LOGGER
 from Backend.helper.settings_manager import SettingsManager
 from Backend.helper.encrypt import encode_string
+from Backend.helper.telegram_sessions import mark_userbot_session_invalid, userbot_is_usable
 
 MAX_RESULTS          = 50
 MAX_RESULTS_PER_CHAT = 50
@@ -42,7 +43,7 @@ _MULTIPART_RE = re.compile(r"(?:part|cd|disc|disk)[s._-]*\d+(?=\.\w+$)", re.IGNO
 
 def is_userbot_available() -> bool:
     from Backend.pyrofork.bot import Userbot
-    return Userbot is not None and not _userbot_session_dead
+    return userbot_is_usable(Userbot) and not _userbot_session_dead
 
 
 def is_global_search_enabled() -> bool:
@@ -237,6 +238,7 @@ async def _search_channel(
             LOGGER.error(f"[USERBOT] Session invalid ({type(e).__name__}): {e}")
             global _userbot_session_dead
             _userbot_session_dead = True
+            mark_userbot_session_invalid(client, e)
             break
         except RPCError as e:
             LOGGER.warning(f"[USERBOT] RPC error in {chat_title} ({msg_filter}): {e}")

@@ -603,40 +603,22 @@ Only needed if you want **Global Search**. It's safe and quick to generate — s
 
 > ⏭️ **Skip this step** entirely if you don't plan to use Global Search.
 
-### 🌐 Easiest Method: Google Colab (works right in your phone's browser)
+### 🌐 Recommended Method: Google Colab (works in a phone browser)
 
-1️⃣ Open **https://colab.new** in your browser.
+Open the **[Telegram User Session String Generator](https://colab.research.google.com/github/rjriajul/session/blob/main/user_tgsess.ipynb)**, then follow the notebook prompts.
 
-2️⃣ Sign in with your Google account.
+1️⃣ Sign in to Google if Colab asks.
 
-3️⃣ Tap **"+ Code"** to add a new code cell.
+2️⃣ Enter your Telegram **API ID** and **API HASH** from [my.telegram.org](https://my.telegram.org).
 
-4️⃣ Paste the code below and press ▶ **Run**:
+3️⃣ Confirm the Telegram login code and your 2-step password when prompted.
 
-```python
-!pip install pyrogram tgcrypto
+4️⃣ Copy the generated value and save it as `USER_SESSION_STRING`:
 
-import asyncio
-from pyrogram import Client
+- **VPS / local deployment:** add it to `config.env`.
+- **Hugging Face Spaces:** add it in **Settings → Variables and secrets** as a Secret named `USER_SESSION_STRING`.
 
-api_id = int(input("API ID: "))
-api_hash = input("API HASH: ")
-
-async def main():
-    async with Client("temp_session", api_id, api_hash) as app:
-        print("\nYour USER_SESSION_STRING is:\n")
-        print(await app.export_session_string())
-
-await main()
-```
-
-5️⃣ Enter your **API ID** and **API HASH** when prompted.
-
-6️⃣ Enter the **login code** Telegram sends you (and your 2-step password, if you have one).
-
-7️⃣ Your **USER_SESSION_STRING** is printed on screen — copy the whole string into `config.env`.
-
-> 🔒 **Keep it private.** Anyone who has this string can access your account, so never share it or commit it to a public repository. To invalidate it instantly, just remove the session from Telegram's **Devices** list.
+> 🔒 **Keep the session string private.** It grants access to your Telegram account. Never share it, send it to another person, or commit it to GitHub. To revoke it, remove the related session from **Telegram → Settings → Devices**, then generate a new one.
 
 ---
 
@@ -817,7 +799,7 @@ CMD ["bash", "start.sh"]
 | `OWNER_ID` | Your Telegram user ID |
 | `DATABASE` | Two MongoDB URIs, comma-separated |
 | `PORT` | `7860` |
-| `USER_SESSION_STRING` | *(optional — for Global Search)* |
+| `USER_SESSION_STRING` | *(optional — for Global Search; generate it in the [Colab session tool](https://colab.research.google.com/github/rjriajul/session/blob/main/user_tgsess.ipynb))* |
 
 > Secrets are injected as environment variables at runtime. The app reads them via `python-dotenv` + `os.getenv`, so they work identically to `config.env`.
 

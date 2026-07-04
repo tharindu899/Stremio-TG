@@ -14,6 +14,7 @@ from Backend.helper.metadata import (
     fetch_selected_tv_metadata,
 )
 from Backend.pyrofork.bot import multi_clients, StreamBot, Userbot
+from Backend.helper.telegram_sessions import userbot_is_usable
 from Backend.helper.custom_dl import run_speed_test, _speed_test_single_client
 from time import time
 from Backend.helper.auto_catalog import (
@@ -1217,7 +1218,7 @@ def _scan_history_client():
     reads message IDs through the admin bot; this optional session is used only
     to learn the exact channel tail for progress and cursor safety.
     """
-    if Userbot is None:
+    if not userbot_is_usable(Userbot):
         return None
     me = getattr(Userbot, "me", None)
     if me is not None and getattr(me, "is_bot", False):

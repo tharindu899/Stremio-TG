@@ -19,6 +19,7 @@ from Backend.helper.archive_split import SplitArchiveError, inspect_split_zip, z
 from Backend.pyrofork.bot import work_loads, multi_clients, client_dc_map, client_failures, client_avg_mbps, Userbot, USERBOT_CLIENT_INDEX
 from Backend.fastapi.security.tokens import verify_token
 from Backend.helper.subtitle_constants import subtitle_mime_type
+from Backend.helper.telegram_sessions import userbot_is_usable
 
 router = APIRouter(tags=["Streaming"])
 
@@ -417,7 +418,7 @@ def _get_userbot_streamer() -> ByteStreamer:
     """Lazily build (and cache) the ByteStreamer wrapping the Userbot
     client. Returns None if no Userbot is configured."""
     global _userbot_streamer
-    if Userbot is None:
+    if not userbot_is_usable(Userbot):
         return None
     if _userbot_streamer is None:
         _userbot_streamer = ByteStreamer(Userbot, USERBOT_CLIENT_INDEX)
@@ -431,7 +432,10 @@ async def global_media_streamer(request: Request, chat_id: int, msg_id: int, tok
     (and shouldn't) be used here."""
     streamer = _get_userbot_streamer()
     if streamer is None:
-        raise HTTPException(status_code=503, detail="Global Search streaming is unavailable (no Userbot configured)")
+        raise HTTPException(
+            status_code=503,
+            detail="Global Search streaming is unavailable because USER_SESSION_STRING is missing or invalid.",
+        )
 
     LOGGER.info(f"[USERBOT] Stream request: chat={chat_id} msg={msg_id}")
     try:
