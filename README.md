@@ -1024,6 +1024,23 @@ Download Nuvio from an official source:
 > 🔑 If you run in **subscription mode**, each user installs their own **personal** addon URL (`/stremio/{token}/manifest.json`) that the bot gives them automatically via `/start`.
 
 
+## 🏷️ Nuvio Stream Badges
+
+This build includes a public Nuvio badge profile for resolution, source, language, video codec/HDR, and audio tags. After deploying, open **Nuvio → Settings → Streams → Import badge profile** and paste:
+
+```text
+https://<your-public-domain>/nuvio-badges.json
+```
+
+For this Space, use:
+
+```text
+https://tharindu899-tg-strimeo.hf.space/nuvio-badges.json
+```
+
+The profile reads the release details already present in each stream title. No token, admin login, or addon reinstall is needed.
+
+
 ## 🏅 Contributors
 
 |<img width="80" src="https://avatars.githubusercontent.com/u/113664541">|<img width="80" src="https://avatars.githubusercontent.com/u/113652899">|<img width="80" src="https://avatars.githubusercontent.com/u/13152917">|<img width="80" src="https://avatars.githubusercontent.com/u/14957082">|<img width="80" src="https://raw.githubusercontent.com/vflixa1prime/Readme/main/VFlixPRime.png">|
