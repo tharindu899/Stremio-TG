@@ -7,7 +7,7 @@ from Backend import db
 from Backend.config import Telegram
 from Backend.pyrofork.bot import work_loads, multi_clients, StreamBot
 from Backend.helper.pyro import get_readable_time
-from Backend.helper.settings_manager import SettingsManager
+from Backend.helper.settings_manager import SettingsManager, get_environment_admin_credentials
 from Backend import StartTime, __version__
 import time
 from Backend.helper.custom_dl import ACTIVE_STREAMS, RECENT_STREAMS
@@ -324,6 +324,10 @@ async def settings_page(request: Request, _: bool = Depends(require_auth)):
     current_user = get_current_user(request)
 
     settings = SettingsManager.current().to_dict()
+    settings["admin_password_set"] = bool(settings.get("admin_password"))
+    settings["admin_credentials_source"] = (
+        "environment" if get_environment_admin_credentials() else "database"
+    )
     settings["admin_password"] = ""
 
     try:

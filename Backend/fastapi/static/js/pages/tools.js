@@ -91,20 +91,17 @@ async function confirmRescan() {
         showToast('Select the channels you want to rescan.', 'error', 'No channels');
         return;
     }
-    const clearText = {
-        media: 'movie and series entries only',
-        subtitles: 'subtitle index rows only',
-        all: 'movie, series and subtitle index rows'
+    const scopeText = {
+        media: 'movies, series and split videos',
+        subtitles: 'subtitles',
+        all: 'media and subtitles'
     }[scope];
-    const safeText = scope === 'subtitles'
-        ? '\n\nTelegram subtitle files and movie/series entries stay safe.'
-        : '\n\nTelegram source files stay safe.';
     const confirmed = await confirmAction({
-        title: 'Start rescan',
-        subtitle: 'The scanner will rebuild selected index records from the first message.',
-        message: `Rescan ${clearText} for ${channels.length} selected channel(s)?`,
-        note: scope === 'subtitles' ? 'Telegram subtitle files and movie/series entries stay safe.' : 'Telegram source files stay safe.',
-        confirmText: 'Start rescan',
+        title: 'Start safe rescan',
+        subtitle: 'The scanner will read from the first message without purging your indexed library.',
+        message: `Safely check older ${scopeText} for ${channels.length} selected channel(s)?`,
+        note: 'Existing indexed records stay in place. Missing posts are added and captions are refreshed for tag-based catalogs.',
+        confirmText: 'Start safe rescan',
         tone: 'primary'
     });
     if (!confirmed) return;

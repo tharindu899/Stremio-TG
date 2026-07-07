@@ -1,11 +1,29 @@
+from secrets import compare_digest
+
 from fastapi import Depends, HTTPException, Request
 from starlette.status import HTTP_401_UNAUTHORIZED
-from Backend.helper.settings_manager import SettingsManager
+from Backend.helper.settings_manager import SettingsManager, get_environment_admin_credentials
 
 def verify_credentials(username: str, password: str) -> bool:
-    """Return True when *username* and *password* match the stored admin credentials."""
-    s = SettingsManager.current()
-    return username == s.admin_username and password == s.admin_password
+    """
+    Return True when a submitted pair matches the current admin credentials.
+
+    When both ADMIN_USERNAME and ADMIN_PASSWORD are explicitly configured in
+    the deployment environment, they are authoritative.  This gives the owner
+    a reliable recovery path even when an older MongoDB settings document still
+    contains credentials from a previous build.
+    """
+    configured = get_environment_admin_credentials()
+    if configured:
+        expected_username, expected_password = configured
+    else:
+        settings = SettingsManager.current()
+        expected_username, expected_password = settings.admin_username, settings.admin_password
+
+    return (
+        compare_digest(str(username), str(expected_username))
+        and compare_digest(str(password), str(expected_password))
+    )
 
 
 def is_authenticated(request: Request) -> bool:

@@ -33,6 +33,53 @@ def convert_objectid_to_str(document: Dict[str, Any]) -> Dict[str, Any]:
     return document
 
 
+def _catalog_item_key(item: dict) -> tuple[str, int, int]:
+    return (
+        "tv" if item.get("media_type") in ["tv", "series"] else "movie",
+        int(item.get("tmdb_id") or 0),
+        int(item.get("db_index") or 1),
+    )
+
+
+def _catalog_items_with_sources(catalog: Dict[str, Any]) -> List[dict]:
+    """Merge owner-added and tag-rule rows without losing their origin."""
+    combined: Dict[tuple[str, int, int], dict] = {}
+    ordered_keys: List[tuple[str, int, int]] = []
+    manual_values = catalog.get("manual_items") if "manual_items" in catalog else catalog.get("items")
+    for source, values in (("manual", manual_values or []), ("tag_rule", catalog.get("rule_items") or [])):
+        for item in values:
+            if not isinstance(item, dict):
+                continue
+            try:
+                key = _catalog_item_key(item)
+            except (TypeError, ValueError):
+                continue
+            if not key[1]:
+                continue
+            if key not in combined:
+                row = dict(item)
+                row["catalog_item_sources"] = [source]
+                combined[key] = row
+                ordered_keys.append(key)
+            elif source not in combined[key]["catalog_item_sources"]:
+                combined[key]["catalog_item_sources"].append(source)
+    return [combined[key] for key in ordered_keys]
+
+
+def _decorate_catalog(catalog: Dict[str, Any]) -> Dict[str, Any]:
+    """Expose one stable combined view to the WebUI and Stremio routes."""
+    manual_values = catalog.get("manual_items") if "manual_items" in catalog else catalog.get("items")
+    manual_count = len(manual_values or [])
+    rule_count = len(catalog.get("rule_items") or [])
+    catalog["manual_items"] = list(manual_values or [])
+    merged = _catalog_items_with_sources(catalog)
+    catalog["items"] = merged
+    catalog["item_count"] = len(merged)
+    catalog["manual_item_count"] = manual_count
+    catalog["rule_item_count"] = rule_count
+    return catalog
+
+
 class Database:
     def __init__(self, db_name: str = "dbStremio"):
         self.db_uris = Telegram.DATABASE
@@ -413,6 +460,85 @@ class Database:
             "days_assigned": days,
         }
 
+    async def annotate_media_source(
+        self, channel: int, msg_id: int, caption: str = "", filename: str = ""
+    ) -> List[Tuple[str, int]]:
+        """Attach Telegram source text to an already indexed quality.
+
+        Safe rescans use this path for existing rows. It lets caption-tag rules
+        learn from historical posts without deleting or duplicating media.
+        """
+        try:
+            stream_id = await encode_string({"chat_id": int(channel), "msg_id": int(msg_id)})
+        except Exception:
+            return []
+
+        clean_caption = str(caption or "").strip() or None
+        clean_filename = str(filename or "").strip() or None
+        affected: List[Tuple[str, int]] = []
+        part_match = {"chat_id": int(channel), "msg_id": int(msg_id)}
+
+        for db_index in range(1, self.current_db_index + 1):
+            storage = self.dbs.get(f"storage_{db_index}")
+            if storage is None:
+                continue
+
+            movie_query = {"$or": [
+                {"telegram.id": stream_id},
+                {"telegram.parts": {"$elemMatch": part_match}},
+            ]}
+            async for movie in storage["movie"].find(movie_query):
+                changed = False
+                for quality in movie.get("telegram") or []:
+                    direct = quality.get("id") == stream_id
+                    split = any(
+                        int(part.get("chat_id") or 0) == int(channel)
+                        and int(part.get("msg_id") or 0) == int(msg_id)
+                        for part in (quality.get("parts") or [])
+                        if isinstance(part, dict)
+                    )
+                    if direct or split:
+                        if clean_caption and quality.get("source_caption") != clean_caption:
+                            quality["source_caption"] = clean_caption
+                            changed = True
+                        if clean_filename and quality.get("source_filename") != clean_filename:
+                            quality["source_filename"] = clean_filename
+                            changed = True
+                if changed:
+                    movie["updated_on"] = datetime.utcnow()
+                    await storage["movie"].replace_one({"_id": movie["_id"]}, movie)
+                    affected.append(("movie", int(movie.get("tmdb_id") or 0)))
+
+            tv_query = {"$or": [
+                {"seasons.episodes.telegram.id": stream_id},
+                {"seasons.episodes.telegram.parts": {"$elemMatch": part_match}},
+            ]}
+            async for show in storage["tv"].find(tv_query):
+                changed = False
+                for season in show.get("seasons") or []:
+                    for episode in season.get("episodes") or []:
+                        for quality in episode.get("telegram") or []:
+                            direct = quality.get("id") == stream_id
+                            split = any(
+                                int(part.get("chat_id") or 0) == int(channel)
+                                and int(part.get("msg_id") or 0) == int(msg_id)
+                                for part in (quality.get("parts") or [])
+                                if isinstance(part, dict)
+                            )
+                            if direct or split:
+                                if clean_caption and quality.get("source_caption") != clean_caption:
+                                    quality["source_caption"] = clean_caption
+                                    changed = True
+                                if clean_filename and quality.get("source_filename") != clean_filename:
+                                    quality["source_filename"] = clean_filename
+                                    changed = True
+                if changed:
+                    show["updated_on"] = datetime.utcnow()
+                    await storage["tv"].replace_one({"_id": show["_id"]}, show)
+                    affected.append(("tv", int(show.get("tmdb_id") or 0)))
+        return [(media_type, tmdb_id) for media_type, tmdb_id in affected if tmdb_id]
+
+
     # -------------------------------
     # Custom Catalog Management
     # -------------------------------
@@ -426,6 +552,9 @@ class Database:
             "name": name,
             "visible": bool(visible),
             "items": [],
+            "rule_items": [],
+            "tag_rule": {"enabled": False, "tags": []},
+            "item_count": 0,
             "created_at": now,
             "updated_at": now,
         })
@@ -435,12 +564,12 @@ class Database:
         query = {"visible": True} if visible_only else {}
         cursor = self.dbs["tracking"]["custom_catalogs"].find(query).sort("updated_at", DESCENDING)
         catalogs = await cursor.to_list(None)
-        return [convert_objectid_to_str(catalog) for catalog in catalogs]
+        return [convert_objectid_to_str(_decorate_catalog(catalog)) for catalog in catalogs]
 
     async def get_custom_catalog(self, catalog_id: str) -> Optional[dict]:
         try:
             catalog = await self.dbs["tracking"]["custom_catalogs"].find_one({"_id": ObjectId(catalog_id)})
-            return convert_objectid_to_str(catalog) if catalog else None
+            return convert_objectid_to_str(_decorate_catalog(catalog)) if catalog else None
         except Exception:
             return None
 
@@ -496,6 +625,7 @@ class Database:
                 {
                     "$push": {"items": {"$each": [item], "$position": 0}},
                     "$set": {"updated_at": datetime.utcnow()},
+                    "$inc": {"item_count": 1},
                 }
             )
             return result.modified_count > 0
@@ -554,7 +684,7 @@ class Database:
         if media_type:
             db_media_type = "tv" if media_type in ["tv", "series"] else "movie"
 
-        raw_items = catalog.get("items", []) or []
+        raw_items = _catalog_items_with_sources(catalog)
         if db_media_type:
             raw_items = [item for item in raw_items if item.get("media_type") == db_media_type]
 
@@ -570,6 +700,7 @@ class Database:
                 int(item.get("db_index", 1))
             )
             if doc:
+                doc["catalog_item_sources"] = item.get("catalog_item_sources") or ["manual"]
                 hydrated_items.append(doc)
 
         total_pages = (total_count + page_size - 1) // page_size if total_count else 0
@@ -599,49 +730,52 @@ class Database:
         page_size: int,
         filter_dict: Optional[dict] = None
     ):
+        """Return exactly one global page from storage_N … storage_1.
+
+        The storage databases are treated as one ordered collection.  Previous
+        code located the first database correctly but then skipped every older
+        database, so a page which crossed a storage boundary could look empty.
+        """
         filter_dict = filter_dict or {}
-        skip = (page - 1) * page_size
-        results = []
-        dbs_checked = []
+        page = max(1, int(page))
+        page_size = max(1, int(page_size))
+        db_counts = []
         total_count = 0
 
-        db_counts = []
-        for i in range(1, self.current_db_index + 1):
-            db_key = f"storage_{i}"
-            db = self.dbs[db_key]
+        for db_index in range(1, self.current_db_index + 1):
+            db = self.dbs[f"storage_{db_index}"]
             count = await db[collection_name].count_documents(filter_dict)
-            db_counts.append((i, count))
+            db_counts.append((db_index, count))
             total_count += count
 
-        start_db_index = None
-        for db_index, count in reversed(db_counts):
-            if skip < count:
-                start_db_index = db_index
-                break
-            skip -= count
+        if not total_count:
+            return [], [], 0
 
-        if not start_db_index:
-            return [], [], total_count
+        total_pages = (total_count + page_size - 1) // page_size
+        effective_page = min(page, total_pages)
+        remaining_skip = (effective_page - 1) * page_size
+        results = []
+        dbs_checked = []
 
+        # Newer storage DBs have priority, matching the original library order.
         for db_index, count in reversed(db_counts):
-            if db_index < start_db_index:
+            if count <= 0:
+                continue
+            if remaining_skip >= count:
+                remaining_skip -= count
                 continue
 
-            db_key = f"storage_{db_index}"
-            db = self.dbs[db_key]
             dbs_checked.append(db_index)
-
+            remaining = page_size - len(results)
             cursor = (
-                db[collection_name]
+                self.dbs[f"storage_{db_index}"][collection_name]
                 .find(filter_dict)
                 .sort(sort_dict)
-                .skip(skip if db_index == start_db_index else 0)
-                .limit(page_size - len(results))
+                .skip(remaining_skip)
+                .limit(remaining)
             )
-
-            docs = await cursor.to_list(None)
-            results.extend(docs)
-
+            results.extend(await cursor.to_list(length=remaining))
+            remaining_skip = 0
             if len(results) >= page_size:
                 break
 
@@ -803,6 +937,8 @@ class Database:
                 parts=[QualityPart(**part)],
                 split_kind=split_kind,
                 media_filename=media_filename,
+                source_caption=metadata_info.get("source_caption") or None,
+                source_filename=metadata_info.get("source_filename") or name,
             )
         else:
             quality_detail = QualityDetail(
@@ -811,6 +947,8 @@ class Database:
                 name=name,
                 size=size,
                 legacy_source_filename=metadata_info.get("legacy_source_filename"),
+                source_caption=metadata_info.get("source_caption") or None,
+                source_filename=metadata_info.get("source_filename") or name,
             )
 
         if metadata_info['media_type'] == "movie":
@@ -1440,12 +1578,13 @@ class Database:
         results, dbs_checked, total_count = await self._paginate_collection(
             "movie", sort_dict, page, page_size, filter_dict=filter_dict
         )
-        total_pages = (total_count + page_size - 1) // page_size
+        total_pages = (total_count + page_size - 1) // page_size if total_count else 0
+        current_page = min(max(1, int(page)), total_pages) if total_pages else 1
         return {
             "total_count": total_count,
             "total_pages": total_pages,
             "databases_checked": dbs_checked,
-            "current_page": page,
+            "current_page": current_page,
             "movies": [convert_objectid_to_str(result) for result in results],
         }
 
@@ -1455,13 +1594,71 @@ class Database:
         results, dbs_checked, total_count = await self._paginate_collection(
             "tv", sort_dict, page, page_size, filter_dict=filter_dict
         )
-        total_pages = (total_count + page_size - 1) // page_size
+        total_pages = (total_count + page_size - 1) // page_size if total_count else 0
+        current_page = min(max(1, int(page)), total_pages) if total_pages else 1
         return {
             "total_count": total_count,
             "total_pages": total_pages,
             "databases_checked": dbs_checked,
-            "current_page": page,
+            "current_page": current_page,
             "tv_shows": [convert_objectid_to_str(result) for result in results],
+        }
+
+    async def search_media_documents(
+        self,
+        media_type: str,
+        query: str,
+        page: int,
+        page_size: int,
+    ) -> dict:
+        """Search one library type with correct global pagination.
+
+        The legacy global search mixes movies and series before the WebUI filters
+        them.  That means a movie search can report only the first 24 mixed rows
+        and makes the second page empty.  The library needs a type-specific
+        query before applying page offsets.
+        """
+        words = [word for word in str(query or "").split() if word]
+        if not words:
+            return await (
+                self.sort_movies([], page, page_size)
+                if media_type == "movie"
+                else self.sort_tv_shows([], page, page_size)
+            )
+
+        regex_query = {
+            "$regex": ".*" + ".*".join(re.escape(word) for word in words) + ".*",
+            "$options": "i",
+        }
+        if media_type == "movie":
+            collection_name = "movie"
+            response_key = "movies"
+            filter_dict = {"$or": [{"title": regex_query}, {"telegram.name": regex_query}]}
+        else:
+            collection_name = "tv"
+            response_key = "tv_shows"
+            filter_dict = {
+                "$or": [
+                    {"title": regex_query},
+                    {"seasons.episodes.telegram.name": regex_query},
+                ]
+            }
+
+        results, dbs_checked, total_count = await self._paginate_collection(
+            collection_name,
+            self._get_sort_dict([]),
+            page,
+            page_size,
+            filter_dict=filter_dict,
+        )
+        total_pages = (total_count + page_size - 1) // page_size if total_count else 0
+        current_page = min(max(1, int(page)), total_pages) if total_pages else 1
+        return {
+            "total_count": total_count,
+            "total_pages": total_pages,
+            "current_page": current_page,
+            "databases_checked": dbs_checked,
+            response_key: [convert_objectid_to_str(result) for result in results],
         }
 
     async def search_documents(

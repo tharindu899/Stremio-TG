@@ -533,6 +533,8 @@ Fill in these values:
 | `DATABASE` | ✅ | **Two** MongoDB URIs, separated by a comma |
 | `PORT` | ✅ | Web server port (keep `8000` unless it's busy) |
 | `USER_SESSION_STRING` | ⬜ | Optional — only needed for **Global Search** |
+| `ADMIN_USERNAME` | ⬜ | Recommended admin login name; when paired with `ADMIN_PASSWORD`, it can recover an old saved login |
+| `ADMIN_PASSWORD` | ⬜ | Recommended admin password; set it as a secret, never commit it |
 
 A completed file looks like this (these are just example values):
 
@@ -544,6 +546,8 @@ USER_SESSION_STRING=""
 OWNER_ID="987654321"
 DATABASE="mongodb+srv://user:pass@cluster0.xxxx.mongodb.net/tracking,mongodb+srv://user:pass@cluster0.xxxx.mongodb.net/storage1"
 PORT="8000"
+ADMIN_USERNAME="admin"
+ADMIN_PASSWORD="choose-a-strong-password"
 ```
 
 > 💾 To save in nano: press `Ctrl + O`, then `Enter`, then `Ctrl + X`.
@@ -800,6 +804,8 @@ CMD ["bash", "start.sh"]
 | `DATABASE` | Two MongoDB URIs, comma-separated |
 | `PORT` | `7860` |
 | `USER_SESSION_STRING` | *(optional — for Global Search; generate it in the [Colab session tool](https://colab.research.google.com/github/rjriajul/session/blob/main/user_tgsess.ipynb))* |
+| `ADMIN_USERNAME` | Your chosen admin username (recommended) |
+| `ADMIN_PASSWORD` | Your chosen admin password (recommended) |
 
 > Secrets are injected as environment variables at runtime. The app reads them via `python-dotenv` + `os.getenv`, so they work identically to `config.env`.
 

@@ -40,6 +40,9 @@
 
       <section id="access" class="config-section">
         <div class="config-section-head"><span class="config-step">02</span><div><h2>Administrator and access channels</h2><p>Protect the WebUI and require users to belong to your allowed Telegram channels.</p></div></div>
+        {% if settings.admin_credentials_source is defined and settings.admin_credentials_source == 'environment' %}
+        <div class="callout-info"><i class="fa-solid fa-key"></i><p>Admin sign-in is managed by <code>ADMIN_USERNAME</code> and <code>ADMIN_PASSWORD</code> in the deployment environment. Change those secrets to change the login permanently.</p></div>
+        {% endif %}
         <div class="field-grid two-up">
           <label><span>Administrator username</span><input type="text" id="admin_username" value="{{ settings.admin_username }}" autocomplete="off"></label>
           <label><span>Administrator password</span><div class="password-control"><input type="password" id="admin_password" placeholder="Leave blank to keep the current password" autocomplete="new-password"><button type="button" onclick="togglePwdVisibility()" aria-label="Show or hide password"><i id="eye-icon" class="fa-solid fa-eye"></i></button></div>{% if settings.admin_password_set is defined and settings.admin_password_set %}<small class="field-ok"><i class="fa-solid fa-circle-check"></i> Password is configured</small>{% endif %}</label>

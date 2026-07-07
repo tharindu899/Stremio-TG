@@ -34,6 +34,8 @@ from Backend.fastapi.routes.api_routes import (
     add_custom_catalog_item_api, remove_custom_catalog_item_api,
     auto_sync_custom_catalogs_api, auto_catalog_sync_status_api,
     get_auto_catalog_settings_api, update_auto_catalog_settings_api,
+    get_custom_catalog_tag_rule_api, update_custom_catalog_tag_rule_api,
+    sync_custom_catalog_tag_rules_api, custom_catalog_tag_sync_status_api,
     get_settings_api, update_settings_api,
     get_tools_channels_api, start_scan_api, cancel_scan_api, scan_status_api,
     start_dbcheck_api, cancel_dbcheck_api, dbcheck_status_api, purge_dead_links_api
@@ -392,6 +394,23 @@ async def list_custom_catalogs(
 @app.post("/api/custom-catalogs")
 async def create_custom_catalog(payload: dict, _: bool = Depends(require_auth)):
     return await create_custom_catalog_api(payload)
+
+@app.post("/api/custom-catalogs/tag-sync")
+async def sync_custom_catalog_tag_rules(_: bool = Depends(require_auth)):
+    return await sync_custom_catalog_tag_rules_api()
+
+@app.get("/api/custom-catalogs/tag-sync/status")
+async def custom_catalog_tag_sync_status(_: bool = Depends(require_auth)):
+    return await custom_catalog_tag_sync_status_api()
+
+@app.get("/api/custom-catalogs/{catalog_id}/tag-rule")
+async def get_custom_catalog_tag_rule(catalog_id: str, _: bool = Depends(require_auth)):
+    return await get_custom_catalog_tag_rule_api(catalog_id)
+
+@app.put("/api/custom-catalogs/{catalog_id}/tag-rule")
+async def update_custom_catalog_tag_rule(catalog_id: str, payload: dict, _: bool = Depends(require_auth)):
+    return await update_custom_catalog_tag_rule_api(catalog_id, payload)
+
 
 @app.put("/api/custom-catalogs/{catalog_id}")
 async def update_custom_catalog(catalog_id: str, payload: dict, _: bool = Depends(require_auth)):

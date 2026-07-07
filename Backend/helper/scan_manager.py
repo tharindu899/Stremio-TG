@@ -323,22 +323,6 @@ class ScanManager:
                 return True
         return False
 
-    async def _quality_belongs_to_channel(self, quality: dict, channel_int: int) -> bool:
-        """Return True when a normal or virtual split quality comes from channel."""
-        try:
-            decoded = await decode_string(quality.get("id") or "")
-        except Exception:
-            return False
-        if not isinstance(decoded, dict):
-            return False
-        parts = decoded.get("parts") or []
-        if parts:
-            return any(int(str(part.get("chat_id", ""))) == channel_int for part in parts)
-        try:
-            return int(str(decoded.get("chat_id", ""))) == channel_int
-        except (TypeError, ValueError):
-            return False
-
     async def start(
         self,
         client,
@@ -349,8 +333,10 @@ class ScanManager:
     ) -> Dict[str, Any]:
         """Start or resume a media-only, subtitle-only, or combined scan.
 
-        A subtitle rescan only clears subtitle index rows. A media rescan only
-        clears movie/series entries. The all scope clears both.
+        Rescan starts from the first channel message but never deletes indexed
+        media first. Existing rows are preserved, and missing historical posts
+        are added safely. This prevents bot-only history limits from emptying a
+        library or its catalog shelves.
         """
         async with self._lock:
             if self.state["status"] == "running":
@@ -375,33 +361,15 @@ class ScanManager:
 
             cursor_map = self.state.setdefault("cursors", {}).setdefault(content_scope, {})
             if mode == "rescan":
-                purged_media = purged_subtitles = 0
+                # A previous implementation purged all selected media/subtitle
+                # rows before it had successfully read old Telegram posts. A bot
+                # session has no GetHistory access and only probes a limited ID
+                # window, so that destructive order could wipe an entire library.
+                #
+                # Rescan is now a safe rebuild: reset only the cursor, retain all
+                # indexed rows, enrich source captions for existing qualities and
+                # add any messages that are truly missing.
                 for channel in channels:
-                    try:
-                        channel_int = int(str(channel).replace("-100", ""))
-                    except ValueError:
-                        LOGGER.warning(f"[ScanManager] Invalid channel id skipped: {channel}")
-                        continue
-                    # Keep media and subtitle cleanup independent. A failure in one
-                    # must never leave stale rows from the other scope behind.
-                    if content_scope in {"media", "all"}:
-                        try:
-                            purged_media += int(
-                                await self._purge_media_channel_entries(channel_int) or 0
-                            )
-                        except Exception as exc:
-                            LOGGER.error(
-                                f"[ScanManager] media purge failed for {channel}: {exc}"
-                            )
-                    if content_scope in {"subtitles", "all"}:
-                        try:
-                            purged_subtitles += int(
-                                await self._db.purge_subtitles_by_channel(channel_int) or 0
-                            )
-                        except Exception as exc:
-                            LOGGER.error(
-                                f"[ScanManager] subtitle purge failed for {channel}: {exc}"
-                            )
                     cursor_map.pop(str(channel), None)
 
                 self.state["selected_channels"] = list(channels)
@@ -409,9 +377,8 @@ class ScanManager:
                 self.state["counters"] = self._blank_counters()
                 self.state["subtitle_scanned_stream_ids"] = []
                 LOGGER.info(
-                    "[ScanManager] Rescan cleared %s media and %s subtitle records.",
-                    purged_media,
-                    purged_subtitles,
+                    "[ScanManager] Safe rescan started for %s channel(s); existing library rows are preserved.",
+                    len(channels),
                 )
             elif can_resume:
                 pending = list(self.state["pending"])
@@ -993,6 +960,20 @@ class ScanManager:
 
             try:
                 if await self._stream_id_exists(channel_int, msg_id):
+                    # Safe rescans do not reinsert an existing Telegram source,
+                    # but they do learn its caption/filename for tag rules.
+                    affected = await self._db.annotate_media_source(
+                        channel_int, msg_id, caption=caption, filename=raw_file_name or file_name
+                    )
+                    if affected:
+                        try:
+                            from Backend.helper.tag_catalog import sync_tag_catalog_for_identity
+                            for affected_type, affected_tmdb_id in affected:
+                                await sync_tag_catalog_for_identity(
+                                    self._db, affected_type, affected_tmdb_id
+                                )
+                        except Exception as tag_exc:
+                            LOGGER.debug("[ScanManager] Tag rule refresh skipped for msg %s: %s", msg_id, tag_exc)
                     state["counters"]["skipped_dup"] += 1
                     return
             except Exception as exc:
@@ -1015,6 +996,11 @@ class ScanManager:
             if metadata_info is None:
                 state["counters"]["skipped_meta"] += 1
                 return
+
+            # Persist raw Telegram source text for caption/tag catalog rules.
+            # This is also used by safe rescans to enrich historical rows.
+            metadata_info["source_caption"] = caption
+            metadata_info["source_filename"] = raw_file_name or file_name
 
             title_clean = remove_urls(metadata_source if metadata_info.get("group_key") else title)
 
@@ -1060,6 +1046,13 @@ class ScanManager:
                 )
                 if updated_id:
                     state["counters"]["indexed"] += 1
+                    try:
+                        from Backend.helper.tag_catalog import sync_tag_catalog_for_identity
+                        await sync_tag_catalog_for_identity(
+                            self._db, metadata_info.get("media_type", "movie"), metadata_info.get("tmdb_id")
+                        )
+                    except Exception as tag_exc:
+                        LOGGER.debug("[ScanManager] Tag rule refresh skipped for msg %s: %s", msg_id, tag_exc)
                     if metadata_info.get("group_key"):
                         LOGGER.info(
                             "[ScanManager] Split part indexed: %s (part %s)",
@@ -1103,51 +1096,6 @@ class ScanManager:
                 counters["processed"] = int(counters.get("processed") or 0) + 1
                 self.state["updated_at"] = _now()
                 await commit_gate.finish(int(commit_slot or 0))
-
-    async def _purge_media_channel_entries(self, channel_int: int) -> int:
-        """Remove only media rows for one channel; subtitles are handled separately."""
-        purged = 0
-        for index in range(1, self._db.current_db_index + 1):
-            storage = self._db.dbs.get(f"storage_{index}")
-            if storage is None:
-                continue
-
-            async for movie in storage["movie"].find({}):
-                remaining = []
-                changed = False
-                for quality in movie.get("telegram", []):
-                    if await self._quality_belongs_to_channel(quality, channel_int):
-                        purged += 1
-                        changed = True
-                        continue
-                    remaining.append(quality)
-                if changed:
-                    if remaining:
-                        movie["telegram"] = remaining
-                        await storage["movie"].replace_one({"_id": movie["_id"]}, movie)
-                    else:
-                        await storage["movie"].delete_one({"_id": movie["_id"]})
-
-            async for tv in storage["tv"].find({}):
-                changed = False
-                for season in tv.get("seasons", []):
-                    for episode in season.get("episodes", []):
-                        remaining = []
-                        for quality in episode.get("telegram", []):
-                            if await self._quality_belongs_to_channel(quality, channel_int):
-                                purged += 1
-                                changed = True
-                                continue
-                            remaining.append(quality)
-                        episode["telegram"] = remaining
-                    season["episodes"] = [episode for episode in season["episodes"] if episode.get("telegram")]
-                tv["seasons"] = [season for season in tv["seasons"] if season.get("episodes")]
-                if changed:
-                    if tv["seasons"]:
-                        await storage["tv"].replace_one({"_id": tv["_id"]}, tv)
-                    else:
-                        await storage["tv"].delete_one({"_id": tv["_id"]})
-        return purged
 
 # ═════════════════════════════════════════════════════════════════════════════
 #  DbCheckManager — integrity checker + dead-link purge

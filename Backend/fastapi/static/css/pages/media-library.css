@@ -48,9 +48,9 @@
 .library-error p { margin: 2px 0 0; color: var(--muted); font-size: 10px; }
 .library-pagination { display: flex; justify-content: center; margin-top: 18px; }
 .library-pagination > div { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 6px; padding: 6px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-1); }
-.pagination-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 34px; min-height: 34px; padding: 0 10px; color: var(--muted); border: 1px solid transparent; border-radius: 8px; background: transparent; font-size: 10px; font-weight: 850; }
+.pagination-btn { cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 34px; min-height: 34px; padding: 0 10px; color: var(--muted); border: 1px solid transparent; border-radius: 8px; background: transparent; font-size: 10px; font-weight: 850; }
 .pagination-btn:hover:not(:disabled) { color: var(--text); border-color: var(--line); background: var(--surface-2); transform: none; }
-.pagination-btn:disabled { opacity: .38; }
+.pagination-btn:disabled { cursor: not-allowed; pointer-events: none; opacity: .38; }
 .pagination-btn.pagination-active { color: #fff; border-color: color-mix(in srgb, var(--primary) 70%, transparent); background: linear-gradient(135deg, var(--primary), var(--secondary)); }
 .pagination-gap { padding: 0 3px; color: var(--muted); font-size: 12px; }
 .library-info { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 2px; color: var(--muted); font-size: 10px; font-weight: 750; }

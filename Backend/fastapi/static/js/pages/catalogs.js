@@ -4,6 +4,8 @@ let selectedCatalogId = null;
 let catalogListExpanded = false;
 let autoSyncPollTimer = null;
 let autoCatalogSettings = null;
+let tagSyncPollTimer = null;
+let tagSyncWasRunning = false;
 
 const html = (value) => String(value ?? '')
   .replace(/&/g, '&amp;')
@@ -18,7 +20,7 @@ const getSelectedCatalog = () => catalogs.find((catalog) => catalog._id === sele
 function updateStats() {
   const total = catalogs.length;
   const visible = catalogs.filter((catalog) => catalog.visible).length;
-  const items = catalogs.reduce((sum, catalog) => sum + ((catalog.items || []).length), 0);
+  const items = catalogs.reduce((sum, catalog) => sum + Number(catalog.item_count ?? (catalog.items || []).length ?? 0), 0);
   document.getElementById('stat-total').textContent = total;
   document.getElementById('stat-visible').textContent = visible;
   document.getElementById('stat-items').textContent = items;
@@ -84,7 +86,7 @@ function renderCatalogs() {
 
   box.innerHTML = catalogs.map((catalog) => {
     const active = catalog._id === selectedCatalogId;
-    const count = (catalog.items || []).length;
+    const count = Number(catalog.item_count ?? (catalog.items || []).length ?? 0);
     const icon = catalog.auto ? 'fa-wand-magic-sparkles' : (catalog.visible ? 'fa-eye' : 'fa-eye-slash');
     return `<article class="catalog-list-card${active ? ' active' : ''}">
       <button class="catalog-select" type="button" onclick="selectCatalog('${html(catalog._id)}')">
@@ -134,7 +136,8 @@ function updateSelectedHeader() {
   visibilityPill.classList.remove('hidden');
   countPill.classList.remove('hidden');
   visibilityPill.textContent = catalog.visible ? 'Visible in Stremio' : 'Hidden from Stremio';
-  countPill.textContent = `${(catalog.items || []).length} title${(catalog.items || []).length === 1 ? '' : 's'}`;
+  const selectedCount = Number(catalog.item_count ?? (catalog.items || []).length ?? 0);
+  countPill.textContent = `${selectedCount} title${selectedCount === 1 ? '' : 's'}`;
   document.getElementById('selected-title').textContent = catalog.name || 'Selected catalog';
   document.getElementById('selected-subtitle').textContent = catalog.visible
     ? 'This shelf appears in the Stremio catalog screen.'
@@ -166,7 +169,7 @@ async function selectCatalog(id) {
   selectedCatalogId = id;
   renderCatalogs();
   updateSelectedHeader();
-  await loadCatalogItems();
+  await Promise.all([loadCatalogItems(), loadTagRule()]);
 }
 
 async function searchMedia() {
@@ -201,6 +204,16 @@ async function addItem(tmdbId, dbIndex, mediaType) {
   } catch (error) { showToast(error.message || 'Failed to add title.', 'error', 'Catalogs'); }
 }
 
+function catalogItemAction(item) {
+  const sources = Array.isArray(item.catalog_item_sources) ? item.catalog_item_sources : ['manual'];
+  const manual = sources.includes('manual');
+  const automatic = sources.includes('tag_rule');
+  const automaticNote = automatic ? '<span class="catalog-auto-source"><i class="fa-solid fa-tag"></i> Caption tag match</span>' : '';
+  if (!manual) return automaticNote;
+  const button = `<button class="btn-ui btn-danger catalog-row-action" type="button" onclick="removeItem(${item.tmdb_id}, ${item.db_index}, '${item.media_type}')"><i class="fa-solid fa-trash"></i><span>Remove</span></button>`;
+  return `${button}${automaticNote}`;
+}
+
 async function loadCatalogItems() {
   if (!selectedCatalogId) return;
   const box = document.getElementById('catalog-items');
@@ -209,8 +222,8 @@ async function loadCatalogItems() {
     const data = await request(`/api/custom-catalogs/${selectedCatalogId}/items?page_size=100`);
     const items = data.items || [];
     box.innerHTML = items.length
-      ? items.map((item) => mediaCard(item, `<button class="btn-ui btn-danger catalog-row-action" type="button" onclick="removeItem(${item.tmdb_id}, ${item.db_index}, '${item.media_type}')"><i class="fa-solid fa-trash"></i><span>Remove</span></button>`)).join('')
-      : emptyState('fa-box-open', 'No titles added yet', 'Use the search above to add media to this catalog.');
+      ? items.map((item) => mediaCard(item, catalogItemAction(item))).join('')
+      : emptyState('fa-box-open', 'No titles added yet', 'Add a title manually or save a caption/filename rule above.');
   } catch (error) { box.innerHTML = emptyState('fa-circle-exclamation', 'Unable to load titles', error.message || 'Please try again.'); }
 }
 
@@ -244,6 +257,129 @@ async function deleteSelectedCatalog() {
     showToast('Catalog deleted.', 'success', 'Catalogs');
     await loadCatalogs();
   } catch (error) { showToast(error.message || 'Failed to delete catalog.', 'error', 'Catalogs'); }
+}
+
+function setTagRuleStatus(message) {
+  const status = document.getElementById('tag-rule-status');
+  if (status) status.textContent = message || 'Ready';
+}
+
+function setTagRuleBusy(busy) {
+  ['tag-rule-save-btn', 'tag-rule-sync-btn'].forEach((id) => {
+    const button = document.getElementById(id);
+    if (button) button.disabled = Boolean(busy);
+  });
+}
+
+async function loadTagRule() {
+  const catalog = getSelectedCatalog();
+  const panel = document.getElementById('tag-rule-panel');
+  const controls = document.getElementById('tag-rule-controls');
+  const unavailable = document.getElementById('tag-rule-unavailable');
+  if (!panel) return;
+  if (!catalog) {
+    panel.classList.add('hidden');
+    return;
+  }
+  panel.classList.remove('hidden');
+  if (catalog.auto) {
+    controls?.classList.add('hidden');
+    unavailable?.classList.remove('hidden');
+    setTagRuleStatus('TMDb managed');
+    return;
+  }
+  controls?.classList.remove('hidden');
+  unavailable?.classList.add('hidden');
+  try {
+    const data = await request(`/api/custom-catalogs/${catalog._id}/tag-rule`);
+    const rule = data.rule || {};
+    const tags = Array.isArray(rule.tags) ? rule.tags.join(', ') : '';
+    document.getElementById('tag-rule-tags').value = tags;
+    document.getElementById('tag-rule-enabled').checked = Boolean(rule.enabled);
+    setTagRuleStatus(rule.enabled ? `${(rule.tags || []).length} phrase${(rule.tags || []).length === 1 ? '' : 's'} active` : 'Rule disabled');
+  } catch (error) {
+    setTagRuleStatus('Rule unavailable');
+    showToast(error.message || 'Could not load this tag rule.', 'error', 'Catalog tags');
+  }
+}
+
+async function saveTagRule() {
+  const catalog = getSelectedCatalog();
+  if (!catalog || catalog.auto) return;
+  const tags = document.getElementById('tag-rule-tags').value;
+  const enabled = document.getElementById('tag-rule-enabled').checked;
+  if (enabled && !tags.trim()) {
+    showToast('Add at least one caption or filename tag, or switch the rule off.', 'error', 'Catalog tags');
+    return;
+  }
+  const button = document.getElementById('tag-rule-save-btn');
+  const original = button?.innerHTML || '';
+  try {
+    setTagRuleBusy(true);
+    if (button) button.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving…';
+    const data = await request(`/api/custom-catalogs/${catalog._id}/tag-rule`, {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({tags, enabled}),
+    });
+    const rule = data.rule?.rule || {};
+    document.getElementById('tag-rule-tags').value = Array.isArray(rule.tags) ? rule.tags.join(', ') : '';
+    document.getElementById('tag-rule-enabled').checked = Boolean(rule.enabled);
+    showToast(data.message || 'Caption tag rule saved.', 'success', 'Catalog tags');
+    await loadTagRuleSyncStatus();
+  } catch (error) {
+    showToast(error.message || 'Could not save the tag rule.', 'error', 'Catalog tags');
+  } finally {
+    if (button) button.innerHTML = original;
+    if (!tagSyncWasRunning) setTagRuleBusy(false);
+  }
+}
+
+async function runTagRuleSync() {
+  const button = document.getElementById('tag-rule-sync-btn');
+  const original = button?.innerHTML || '';
+  try {
+    setTagRuleBusy(true);
+    if (button) button.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Syncing…';
+    const data = await request('/api/custom-catalogs/tag-sync', {method: 'POST'});
+    showToast(data.message || 'Caption tag sync started.', 'info', 'Catalog tags');
+    await loadTagRuleSyncStatus();
+  } catch (error) {
+    showToast(error.message || 'Could not start caption tag sync.', 'error', 'Catalog tags');
+    setTagRuleBusy(false);
+  } finally {
+    if (button) button.innerHTML = original;
+  }
+}
+
+async function loadTagRuleSyncStatus() {
+  try {
+    const data = await request('/api/custom-catalogs/tag-sync/status');
+    const status = data.status || {};
+    if (status.running) {
+      tagSyncWasRunning = true;
+      setTagRuleStatus(`${status.scanned || 0} scanned · ${status.matched || 0} matches`);
+      setTagRuleBusy(true);
+      if (!tagSyncPollTimer) tagSyncPollTimer = setInterval(loadTagRuleSyncStatus, 1800);
+      return;
+    }
+    const hadRunning = tagSyncWasRunning;
+    tagSyncWasRunning = false;
+    setTagRuleBusy(false);
+    if (tagSyncPollTimer) {
+      clearInterval(tagSyncPollTimer);
+      tagSyncPollTimer = null;
+    }
+    if (status.error) setTagRuleStatus('Sync failed');
+    else if (status.finished_at) setTagRuleStatus(status.message || 'Sync complete');
+    if (hadRunning) {
+      await loadCatalogs();
+      await loadCatalogItems();
+      await loadTagRule();
+    }
+  } catch {
+    setTagRuleStatus('Status unavailable');
+  }
 }
 
 function autoChoiceCount() {
@@ -403,4 +539,4 @@ function toggleCatalogExpand() {
   if (button) button.textContent = catalogListExpanded ? 'Show less' : 'Show all catalogs';
 }
 
-document.addEventListener('DOMContentLoaded', () => { loadCatalogs(); loadAutoSyncStatus(); loadAutoCatalogSettings(); });
+document.addEventListener('DOMContentLoaded', () => { loadCatalogs(); loadAutoSyncStatus(); loadAutoCatalogSettings(); loadTagRuleSyncStatus(); });

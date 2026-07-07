@@ -5,7 +5,7 @@ from fastapi import Request, Query, HTTPException
 from fastapi.responses import StreamingResponse
 from Backend import db, StartTime, __version__
 from Backend.logger import LOGGER
-from Backend.helper.settings_manager import SettingsManager
+from Backend.helper.settings_manager import SettingsManager, get_environment_admin_credentials
 from Backend.helper.pyro import get_readable_time
 from Backend.helper.metadata import (
     search_movie_candidates,
@@ -23,6 +23,12 @@ from Backend.helper.auto_catalog import (
     get_auto_catalog_settings,
     update_auto_catalog_settings,
     disable_auto_catalogs,
+)
+from Backend.helper.tag_catalog import (
+    get_catalog_tag_rule,
+    get_tag_catalog_sync_status,
+    start_tag_catalog_sync_background,
+    update_catalog_tag_rule,
 )
 
 from Backend.helper.settings_manager import SettingsManager
@@ -76,19 +82,11 @@ async def list_media_api(
     try:
         response_key = "movies" if media_type == "movie" else "tv_shows"
         if search:
-            result = await db.search_documents(search, page, page_size)
-            filtered_results = [item for item in result['results'] if item.get('media_type') == media_type]
-            total_filtered = len(filtered_results)
-            start_index = (page - 1) * page_size
-            end_index = start_index + page_size
-            paged_results = filtered_results[start_index:end_index]
-            paged_results = await db.attach_subtitle_summaries(paged_results, media_type)
-            return {
-                "total_count": total_filtered,
-                "current_page": page,
-                "total_pages": (total_filtered + page_size - 1) // page_size,
-                response_key: paged_results,
-            }
+            result = await db.search_media_documents(media_type, search, page, page_size)
+            result[response_key] = await db.attach_subtitle_summaries(
+                result.get(response_key, []), media_type
+            )
+            return result
 
         result = (
             await db.sort_movies([], page, page_size)
@@ -1016,6 +1014,46 @@ async def remove_custom_catalog_item_api(
     return {"message": "Removed from catalog.", "removed": True}
 
 
+async def get_custom_catalog_tag_rule_api(catalog_id: str):
+    rule = await get_catalog_tag_rule(db, catalog_id)
+    if not rule:
+        raise HTTPException(status_code=404, detail="Catalog not found.")
+    if not rule.get("available"):
+        raise HTTPException(status_code=400, detail="TMDb automatic catalogs manage their own items and cannot use caption tag rules.")
+    return rule
+
+
+async def update_custom_catalog_tag_rule_api(catalog_id: str, payload: dict):
+    tags = payload.get("tags", [])
+    enabled = payload.get("enabled", True)
+    if not isinstance(tags, (str, list)):
+        raise HTTPException(status_code=400, detail="tags must be a list or comma-separated text.")
+    rule = await update_catalog_tag_rule(db, catalog_id, tags, enabled)
+    if not rule:
+        raise HTTPException(status_code=404, detail="Catalog not found or is managed automatically.")
+    sync = await start_tag_catalog_sync_background(db, force=True)
+    return {
+        "message": "Caption tag rule saved. Matching titles are updating in the background.",
+        "rule": rule,
+        "sync": sync,
+    }
+
+
+async def sync_custom_catalog_tag_rules_api():
+    try:
+        result = await start_tag_catalog_sync_background(db, force=True)
+        return {"message": result.get("message", "Caption tag sync started."), "result": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def custom_catalog_tag_sync_status_api():
+    try:
+        return {"status": await get_tag_catalog_sync_status(db)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 async def auto_sync_custom_catalogs_api(full_rebuild: bool = False):
     try:
         result = await start_auto_catalog_sync_background(db, force=True, full_rebuild=full_rebuild)
@@ -1086,6 +1124,9 @@ async def get_settings_api() -> dict:
     # Never expose the raw password — let the UI know whether one is set
     data["admin_password_set"] = bool(data.get("admin_password"))
     data["admin_password"] = ""
+    data["admin_credentials_source"] = (
+        "environment" if get_environment_admin_credentials() else "database"
+    )
 
     try:
         data["database_list"] = db.get_database_list()

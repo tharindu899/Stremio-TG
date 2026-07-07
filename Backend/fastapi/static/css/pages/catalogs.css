@@ -146,3 +146,28 @@
   .catalog-media-row { grid-template-columns: 52px minmax(0, 1fr); }
   .catalog-media-poster { width: 52px; height: 78px; }
 }
+
+
+/* Caption/filename catalog rules */
+.tag-rule-panel {
+  margin: 0 0 18px;
+  padding: 18px;
+  border: 1px solid var(--line, rgba(148, 163, 184, .22));
+  border-radius: 18px;
+  background: var(--surface, rgba(15, 23, 42, .42));
+}
+.tag-rule-heading { display:flex; justify-content:space-between; gap:16px; align-items:flex-start; }
+.tag-rule-heading h3 { margin: 4px 0 6px; font-size: 1rem; }
+.tag-rule-heading p { margin:0; max-width:680px; }
+.tag-rule-status { flex:none; border-radius:999px; padding:6px 10px; font-size:.74rem; font-weight:700; background:var(--chip, rgba(99,102,241,.14)); }
+.tag-rule-controls { margin-top:16px; }
+.tag-rule-field { display:grid; gap:7px; }
+.tag-rule-field > span { font-size:.82rem; font-weight:700; }
+.tag-rule-field textarea { width:100%; min-height:76px; resize:vertical; border-radius:12px; padding:11px 12px; color:inherit; background:var(--input, rgba(15, 23, 42, .35)); border:1px solid var(--line, rgba(148,163,184,.25)); font:inherit; }
+.tag-rule-field small { opacity:.72; font-size:.76rem; }
+.tag-rule-footer { display:flex; justify-content:space-between; align-items:center; gap:16px; margin-top:14px; }
+.tag-rule-toggle { flex:1; }
+.tag-rule-actions { display:flex; gap:8px; flex-wrap:wrap; }
+.tag-rule-unavailable { padding:13px 14px; border-radius:12px; background:rgba(148,163,184,.12); font-size:.86rem; }
+.catalog-auto-source { display:inline-flex; align-items:center; gap:6px; margin-top:8px; font-size:.74rem; font-weight:700; opacity:.8; }
+@media (max-width: 680px) { .tag-rule-heading, .tag-rule-footer { flex-direction:column; align-items:stretch; } .tag-rule-actions .button-outline, .tag-rule-actions .button-solid { flex:1; } }

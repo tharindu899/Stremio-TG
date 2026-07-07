@@ -26,6 +26,9 @@ class QualityDetail(BaseModel):
     # It lets a later validated `.002` promote the earlier row safely even
     # when its user-facing caption differs from the Telegram filename.
     legacy_source_filename: Optional[str] = None
+    # Original Telegram text retained for caption/tag catalog rules.
+    source_caption: Optional[str] = None
+    source_filename: Optional[str] = None
 
 
 # ---------------------------

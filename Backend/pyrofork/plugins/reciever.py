@@ -266,6 +266,12 @@ async def _queue_media_index(
     )
 
     status_kind = "SPLIT" if split_upload_info else "VIDEO"
+    # Persist the original Telegram caption and file name. Custom catalog tag
+    # rules use these values without changing the file shown to stream users.
+    if metadata_info is not None:
+        metadata_info["source_caption"] = message.caption or ""
+        metadata_info["source_filename"] = getattr(file, "file_name", "") or title
+
     if metadata_info is None:
         LOGGER.warning("Metadata failed for file: %s (ID: %s)", title, msg_id)
         await _notify_upload_failure(
@@ -343,6 +349,13 @@ async def process_file():
                 )
 
             if updated_id:
+                try:
+                    from Backend.helper.tag_catalog import sync_tag_catalog_for_identity
+                    await sync_tag_catalog_for_identity(
+                        db, metadata_info.get("media_type", "movie"), metadata_info.get("tmdb_id")
+                    )
+                except Exception as exc:
+                    LOGGER.debug("Tag catalog refresh skipped for live message %s: %s", msg_id, exc)
                 try:
                     await relink_unmatched_subtitles(db, limit=150)
                 except Exception as exc:

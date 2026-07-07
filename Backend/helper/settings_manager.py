@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Any, Dict, List
 from datetime import datetime, timezone
+from os import getenv
 from Backend.logger import LOGGER
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -32,6 +33,39 @@ _DEFAULTS: Dict[str, Any] = {
     "settings_revision": 0,
     "updated_at": "",
 }
+
+
+def get_environment_admin_credentials() -> tuple[str, str] | None:
+    """
+    Return an explicitly configured admin credential pair from the environment.
+
+    ``Telegram.ADMIN_*`` has fallback values (``admin``), so it cannot tell
+    whether a deployment owner actually set credentials in Hugging Face / Docker.
+    This helper reads the raw environment instead.  A partial pair is ignored so
+    a typo can never lock the owner out of an existing database-backed account.
+    """
+    username = getenv("ADMIN_USERNAME")
+    password = getenv("ADMIN_PASSWORD")
+
+    if username is None and password is None:
+        return None
+
+    username = (username or "").strip()
+    password = (password or "").strip()
+    if not username or not password:
+        return None
+
+    return username, password
+
+
+def _has_partial_environment_admin_credentials() -> bool:
+    """True when only one of the two credential environment variables is set."""
+    username = getenv("ADMIN_USERNAME")
+    password = getenv("ADMIN_PASSWORD")
+    return (username is None) != (password is None) or (
+        (username is not None or password is not None)
+        and not get_environment_admin_credentials()
+    )
 
 
 def _seed_from_env() -> Dict[str, Any]:
@@ -191,6 +225,43 @@ class SettingsManager:
             raw = await db.get_settings()
             if not raw:
                 raise RuntimeError("Runtime settings seed could not be read back from the tracking database.")
+        # An explicitly supplied ADMIN_USERNAME + ADMIN_PASSWORD pair is an
+        # owner-controlled recovery path.  Earlier builds only copied those
+        # values on the very first launch, then an old MongoDB settings document
+        # silently won forever.  That produced the "Invalid credentials" loop
+        # after a code update.  Keep MongoDB in sync, but only when BOTH values
+        # were deliberately supplied by the deployment owner.
+        env_credentials = get_environment_admin_credentials()
+        if env_credentials:
+            env_username, env_password = env_credentials
+            if (
+                str(raw.get("admin_username") or "") != env_username
+                or str(raw.get("admin_password") or "") != env_password
+            ):
+                updated = dict(raw)
+                updated["admin_username"] = env_username
+                updated["admin_password"] = env_password
+                updated["settings_revision"] = int(raw.get("settings_revision") or 0) + 1
+                updated["updated_at"] = datetime.now(timezone.utc).isoformat()
+                if await db.save_settings(updated):
+                    raw = await db.get_settings() or updated
+                    LOGGER.info(
+                        "SettingsManager: admin credentials synchronized from explicit environment values."
+                    )
+                else:
+                    # Login still accepts the explicit pair directly in
+                    # security.credentials, so a transient Mongo failure cannot
+                    # lock the deployment owner out.
+                    LOGGER.warning(
+                        "SettingsManager: could not persist explicit environment admin credentials; "
+                        "using them for this process anyway."
+                    )
+        elif _has_partial_environment_admin_credentials():
+            LOGGER.warning(
+                "ADMIN_USERNAME and ADMIN_PASSWORD must both be set. "
+                "Keeping the existing MongoDB admin credentials unchanged."
+            )
+
         cls._current = Settings(raw)
         current = cls.current()
         LOGGER.info(

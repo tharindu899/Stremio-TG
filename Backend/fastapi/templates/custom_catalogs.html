@@ -2,7 +2,7 @@
 
 {% block title %}Catalogs · TG Stremio{% endblock %}
 {% block extra_head %}
-<link rel="stylesheet" href="/static/css/pages/catalogs.css?v=3.6.120">
+<link rel="stylesheet" href="/static/css/pages/catalogs.css?v=3.6.132">
 {% endblock %}
 
 {% block content %}
@@ -69,6 +69,17 @@
       <div id="catalog-empty-guide" class="editor-empty"><i class="fa-solid fa-folder-open"></i><h3>Your workspace is ready</h3><p>Select an existing shelf or create a new one to start curating content.</p></div>
 
       <div id="catalog-workspace" class="hidden editor-workspace">
+        <section id="tag-rule-panel" class="tag-rule-panel" aria-live="polite">
+          <div class="tag-rule-heading">
+            <div><p class="block-kicker">Automatic matching</p><h3>Caption &amp; filename tags</h3><p>Any matching phrase sends a title to this catalog. Manual titles stay separate and safe.</p></div>
+            <span id="tag-rule-status" class="tag-rule-status">Ready</span>
+          </div>
+          <div id="tag-rule-unavailable" class="tag-rule-unavailable hidden"><i class="fa-solid fa-wand-magic-sparkles"></i> This TMDb automatic shelf manages its own titles.</div>
+          <div id="tag-rule-controls" class="tag-rule-controls">
+            <label class="tag-rule-field"><span>Tags or phrases</span><textarea id="tag-rule-tags" rows="2" placeholder="Example: Hindi, Hindi Dubbed, [HIN]"></textarea><small>Separate phrases with commas or new lines. Matching ignores dots, dashes and letter case.</small></label>
+            <div class="tag-rule-footer"><label class="visibility-toggle tag-rule-toggle"><span><b>Enable automatic matching</b><small>Applies to future uploads and safe rescans.</small></span><input id="tag-rule-enabled" type="checkbox"><i></i></label><div class="tag-rule-actions"><button type="button" class="button-outline" id="tag-rule-sync-btn" onclick="runTagRuleSync()"><i class="fa-solid fa-rotate"></i> Sync matches</button><button type="button" class="button-solid" id="tag-rule-save-btn" onclick="saveTagRule()"><i class="fa-solid fa-floppy-disk"></i> Save rule</button></div></div>
+          </div>
+        </section>
         <div class="library-finder">
           <div class="finder-title"><div><p class="block-kicker">Library search</p><h3>Add a title</h3></div><span>Search your indexed media</span></div>
           <div class="finder-row">
@@ -89,5 +100,5 @@
 {% endblock %}
 
 {% block extra_scripts %}
-<script src="/static/js/pages/catalogs.js?v=3.6.120" defer></script>
+<script src="/static/js/pages/catalogs.js?v=3.6.132" defer></script>
 {% endblock %}
