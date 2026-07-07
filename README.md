@@ -1032,19 +1032,18 @@ Download Nuvio from an official source:
 
 ## 🏷️ Nuvio Stream Badges
 
-This build includes a public Nuvio badge profile for resolution, source, language, video codec/HDR, and audio tags. After deploying, open **Nuvio → Settings → Streams → Import badge profile** and paste:
+This project no longer bundles badge JSON or PNG files. Import one of these external Nuvio badge profiles instead.
 
-```text
-https://<your-public-domain>/nuvio-badges.json
-```
+1. Open **Nuvio → Settings → Streams → Import badge profile**.
+2. Paste the URL for the style you want:
 
-For this Space, use:
+| Style | Badge profile URL |
+| :--- | :--- |
+| **Transparent badges** | `https://gist.github.com/tharindu899/53ad15643824c59150d7a699f27557b1/raw/e599169242a73359fedfd59e453bf7dd66a54389/transparent-badges-nuvio` |
+| **Mono badges** | `https://gist.githubusercontent.com/tharindu899/81fe72ad8a2adede6647ee2e0088e1ac/raw/d5959030e02fd8e04ef57d9f928e6193ef2b8a23/mono-badges-nuvio` |
+| **Solid badges** | `https://gist.githubusercontent.com/tharindu899/b3cc3335091e25619e377dfa7fb4a1c7/raw/59a0675eaa7ab5922189fb550dfa189f497dc337/solid-badges-nuvio` |
 
-```text
-https://tharindu899-tg-strimeo.hf.space/nuvio-badges.json
-```
-
-The profile reads the release details already present in each stream title. No token, admin login, or addon reinstall is needed.
+Import the profile that matches your preferred look. All three profiles stay external, so deployments do not need local badge files or a `/nuvio-badges.json` route.
 
 
 ## 🏅 Contributors
