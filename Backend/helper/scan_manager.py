@@ -10,6 +10,7 @@ from Backend.logger import LOGGER
 from Backend.helper.encrypt import encode_string, decode_string
 from Backend.helper.metadata import metadata_from_caption_or_filename
 from Backend.helper.pyro import clean_filename, get_readable_file_size, remove_urls
+from Backend.helper.caption_tools import extract_supported_filename
 from Backend.helper.subtitle_service import index_subtitle, relink_unmatched_subtitles
 from Backend.helper.subtitle_constants import is_subtitle_file
 from Backend.helper.split_files import (
@@ -859,7 +860,7 @@ class ScanManager:
             scope = self._normalise_scope(state.get("content_scope"))
 
             if message.document and (
-                is_subtitle_file(message.caption or "", message.document.mime_type or "")
+                is_subtitle_file(extract_supported_filename(message.caption or ""), message.document.mime_type or "")
                 or is_subtitle_file(message.document.file_name or "", message.document.mime_type or "")
             ):
                 if scope == "media":
@@ -909,6 +910,7 @@ class ScanManager:
             file = message.video or message.document
             raw_file_name = getattr(file, "file_name", "") or ""
             caption = message.caption or ""
+            caption_filename = extract_supported_filename(caption)
             # Keep the real Telegram filename for the downloadable stream; the
             # caption is used only for metadata lookup and is always tried first.
             title = raw_file_name or caption or "video.mkv"
@@ -917,9 +919,9 @@ class ScanManager:
                 split_source, split_info = split_override
             else:
                 split_source, split_info = find_split_source(
-                    caption,
+                    caption_filename,
                     raw_file_name,
-                    clean_filename(caption),
+                    clean_filename(caption_filename),
                     clean_filename(raw_file_name),
                 )
 
@@ -941,7 +943,7 @@ class ScanManager:
                 is_video_document = (
                     mime_type.startswith("video/")
                     or bool(split_info)
-                    or is_video_filename(caption)
+                    or is_video_filename(caption_filename)
                     or is_video_filename(raw_file_name)
                 )
 
@@ -1010,7 +1012,7 @@ class ScanManager:
             if not metadata_info.get("group_key"):
                 extension_suffix = "" if title_clean.lower().endswith((".mkv", ".mp4", ".avi", ".ts", ".m4v", ".mov", ".wmv", ".webm", ".flv", ".mpeg", ".mpg")) else ".mkv"
                 _, recovered_split = find_split_source(
-                    caption,
+                    caption_filename,
                     title_clean,
                     f"{title_clean}{extension_suffix}",
                     file_name,

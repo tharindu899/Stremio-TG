@@ -68,6 +68,35 @@ def _has_partial_environment_admin_credentials() -> bool:
     )
 
 
+def _explicit_environment_runtime_fallbacks() -> Dict[str, str]:
+    """Return non-empty deployment values that can repair blank DB settings.
+
+    Runtime settings normally live in MongoDB. Older deployments may already
+    have an ``app_settings`` document whose TMDb key/base URL are blank, so the
+    first-start environment seed never runs again. Only fill blank database
+    fields; a non-empty WebUI value always remains authoritative.
+    """
+    tmdb_api = (getenv("TMDB_API") or "").strip()
+    base_url = (getenv("BASE_URL") or "").strip().rstrip("/")
+
+    # Hugging Face exposes the public host to Docker Spaces. This keeps bot
+    # install links absolute even when BASE_URL was not entered manually.
+    if not base_url:
+        space_host = (getenv("SPACE_HOST") or "").strip().strip("/")
+        if space_host:
+            if space_host.startswith(("http://", "https://")):
+                base_url = space_host.rstrip("/")
+            else:
+                base_url = f"https://{space_host}"
+
+    values: Dict[str, str] = {}
+    if tmdb_api:
+        values["tmdb_api"] = tmdb_api
+    if base_url:
+        values["base_url"] = base_url
+    return values
+
+
 def _seed_from_env() -> Dict[str, Any]:
     """Read legacy Telegram config env values. Called only on FIRST startup."""
     from Backend.config import Telegram  # lazy import — see note at top of file
@@ -261,6 +290,35 @@ class SettingsManager:
                 "ADMIN_USERNAME and ADMIN_PASSWORD must both be set. "
                 "Keeping the existing MongoDB admin credentials unchanged."
             )
+
+        # Repair only blank legacy fields from explicit deployment variables.
+        # This addresses databases that were seeded before TMDB_API/BASE_URL
+        # were configured and would otherwise keep winning on every restart.
+        runtime_fallbacks = _explicit_environment_runtime_fallbacks()
+        blank_repairs = {
+            key: value
+            for key, value in runtime_fallbacks.items()
+            if not str(raw.get(key) or "").strip()
+        }
+        if blank_repairs:
+            updated = dict(raw)
+            updated.update(blank_repairs)
+            updated["settings_revision"] = int(raw.get("settings_revision") or 0) + 1
+            updated["updated_at"] = datetime.now(timezone.utc).isoformat()
+            if await db.save_settings(updated):
+                raw = await db.get_settings() or updated
+                LOGGER.info(
+                    "SettingsManager: repaired blank runtime setting(s) from deployment environment: %s.",
+                    ", ".join(sorted(blank_repairs)),
+                )
+            else:
+                # Keep the process usable even if Mongo has a transient write
+                # failure; the next restart will retry persistence.
+                raw = updated
+                LOGGER.warning(
+                    "SettingsManager: could not persist deployment fallbacks; "
+                    "using them for this process only."
+                )
 
         cls._current = Settings(raw)
         current = cls.current()

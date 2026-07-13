@@ -1,4 +1,5 @@
 aiofiles
+certifi
 fastapi
 httpx
 motor

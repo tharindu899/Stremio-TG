@@ -17,6 +17,7 @@ from pyrogram.errors import (
 )
 
 from Backend.logger import LOGGER
+from Backend.helper.caption_tools import extract_supported_filename
 from Backend.helper.settings_manager import SettingsManager
 from Backend.helper.encrypt import encode_string
 from Backend.helper.telegram_sessions import mark_userbot_session_invalid, userbot_is_usable
@@ -123,7 +124,7 @@ def _parse_and_validate(
 
 def _video_filename(message) -> Optional[str]:
     if message.video:
-        return (message.caption or "").strip() or getattr(message.video, "file_name", None) or "video.mkv"
+        return extract_supported_filename(message.caption or "") or getattr(message.video, "file_name", None) or "video.mkv"
     if message.document:
         mime = message.document.mime_type or ""
         if mime.startswith("video/") or message.document.file_name and (
@@ -131,7 +132,7 @@ def _video_filename(message) -> Optional[str]:
                 (".mkv", ".mp4", ".avi", ".ts", ".m4v", ".mov", ".wmv", ".webm", ".flv")
             )
         ):
-            return (message.caption or "").strip() or message.document.file_name or "video.mkv"
+            return extract_supported_filename(message.caption or "") or message.document.file_name or "video.mkv"
     return None
 
 

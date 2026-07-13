@@ -13,6 +13,7 @@ from Backend.helper.settings_manager import SettingsManager
 import Backend
 from Backend.logger import LOGGER
 from Backend.helper.encrypt import encode_string
+from Backend.helper.caption_tools import extract_supported_filename
 from Backend.helper.split_files import SplitFileInfo, detect_split_file, strip_part_suffix, split_metadata_fields
 
 # ----------------- Configuration -----------------
@@ -21,6 +22,7 @@ DELAY = 0
 
 _tmdb_client: aioTMDb | None = None
 _tmdb_client_key: str | None = None
+_tmdb_missing_key_warned = False
 
 
 def get_tmdb_client() -> aioTMDb:
@@ -611,9 +613,21 @@ async def safe_tmdb_search(
     allow_anime_bridge: bool = True,
 ):
     """Search TMDb with release-name variants and conservative alias fallback."""
+    global _tmdb_missing_key_warned
+
     cache_key = f"tmdb_search::{type_}::{title}::{year}"
     if cache_key in TMDB_SEARCH_CACHE:
         return TMDB_SEARCH_CACHE[cache_key]
+
+    if not (SettingsManager.current().tmdb_api or "").strip():
+        if not _tmdb_missing_key_warned:
+            LOGGER.warning(
+                "TMDb API key is empty; TMDb fallback is disabled until a key is saved "
+                "in Settings or provided through TMDB_API."
+            )
+            _tmdb_missing_key_warned = True
+        TMDB_SEARCH_CACHE[cache_key] = None
+        return None
 
     try:
         all_results = []
@@ -1002,12 +1016,14 @@ _RELEASE_TAG_TECHNICAL_RE = re.compile(
 # releases are handled separately by ``_release_episode_parts`` below.
 _EXPLICIT_EPISODE_MARKER_RE = re.compile(
     r"""(?ix)
+    (?<![A-Za-z0-9])
     (?:
-        \bS(?:eason)?\s*0*\d{1,3}\s*[-_. ]*E(?:pisode)?\s*0*\d{1,4}\b
-        |\b\d{1,3}\s*[xX]\s*\d{1,4}\b
-        |\bseason\s*\d{1,3}\s*(?:episode|ep)\s*\d{1,4}\b
-        |\b(?:episode|ep)\s*\d{1,4}\b
+        S(?:eason)?\s*0*\d{1,3}\s*[-_. ]*E(?:pisode)?\s*0*\d{1,4}
+        |\d{1,3}\s*[xX]\s*\d{1,4}
+        |season\s*\d{1,3}\s*(?:episode|ep)\s*\d{1,4}
+        |(?:episode|ep)\s*\d{1,4}
     )
+    (?![A-Za-z0-9])
     """
 )
 
@@ -1224,7 +1240,12 @@ def _clean_metadata_candidate(value: object) -> str:
     the release name.  Remove only URL noise and normalize whitespace here;
     PTN still receives the original release wording, language, and tags.
     """
-    text = _METADATA_URL_RE.sub(" ", str(value or ""))
+    raw_text = str(value or "")
+    # Prefer the first supported filename in a multi-line Telegram caption.
+    # This removes donation/channel text after `.mkv`, `.srt`, split ZIP
+    # suffixes, etc., while preserving the complete release name itself.
+    text = extract_supported_filename(raw_text) or raw_text
+    text = _METADATA_URL_RE.sub(" ", text)
     text = re.sub(r"[\r\n\t]+", " ", text)
     text = re.sub(r"\s+", " ", text).strip(" `\"'")
     if not text:
@@ -1273,12 +1294,18 @@ async def metadata_from_caption_or_filename(
     Stremio streams.
     """
     candidates = metadata_source_candidates(caption, filename)
+    resolved_override = override_id
+    if not resolved_override:
+        try:
+            resolved_override = extract_default_id(str(caption or ""))
+        except Exception:
+            resolved_override = None
     for source_kind, source in candidates:
         result = await metadata(
             str(filename or source),
             channel,
             msg_id,
-            override_id=override_id,
+            override_id=resolved_override,
             split_info_override=split_info_override,
             match_source=source,
             quality_source=str(filename or source),
@@ -1403,16 +1430,16 @@ async def metadata(
     # Fansub/anime releases frequently use absolute numbering (e.g. `- 417`)
     # with no SxxExx marker. Treat them as TV episodes and resolve the real
     # provider season/episode pair later, after the series metadata is known.
-    if not season and recovered_episode is not None:
+    if season is None and recovered_episode is not None:
         title = recovered_title or title
         episode = recovered_episode
         season = 1
         absolute_episode = recovered_episode
-    elif not season and episode:
+    elif season is None and episode is not None:
         season = 1
         absolute_episode = int(episode)
 
-    if season and not episode:
+    if season is not None and episode is None:
         LOGGER.warning(f"Missing episode in {filename}: {parsed}")
         return None
     if not quality and quality_fallback_source and quality_fallback_source != parse_source:
@@ -1456,7 +1483,7 @@ async def metadata(
     split_fields = split_metadata_fields(channel, quality, split_info) if split_info else {}
 
     try:
-        if season and episode:
+        if season is not None and episode is not None:
             LOGGER.info(f"Fetching TV metadata: {title} S{season:02d}E{episode:02d} (year={year})")
             result = await fetch_tv_metadata(
                 title,

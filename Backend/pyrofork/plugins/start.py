@@ -2,6 +2,7 @@ from pyrogram import filters, Client, enums
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from Backend.helper.custom_filter import CustomFilters
 from Backend.helper.settings_manager import SettingsManager
+from Backend.helper.public_url import configured_public_base_url
 from Backend.config import Telegram
 from Backend import db
 from datetime import datetime
@@ -11,8 +12,17 @@ from datetime import datetime
 async def send_start_message(client: Client, message: Message):
     try:
         user_id = (message.from_user.id if message.from_user else None) or (message.sender_chat.id if message.sender_chat else None) or message.chat.id
-        base_url = SettingsManager.current().base_url
-        addon_url = f"{base_url}/stremio/manifest.json"
+        base_url = configured_public_base_url() or ""
+        addon_url = None
+
+        if not base_url:
+            return await message.reply_text(
+                "⚠️ <b>BASE_URL is not configured.</b>\n\n"
+                "Open the Web Settings page, save your public HTTPS Space URL, "
+                "then run /start again.",
+                quote=True,
+                parse_mode=enums.ParseMode.HTML,
+            )
 
         if not SettingsManager.current().subscription:
             if user_id != Telegram.OWNER_ID:
@@ -24,7 +34,13 @@ async def send_start_message(client: Client, message: Message):
                 addon_url = f"{base_url}/stremio/{token_str}/manifest.json"
             except Exception as e:
                 print(f"DEBUG: Error ensuring token for free user: {e}")
-                
+
+            if not addon_url:
+                return await message.reply_text(
+                    "⚠️ Could not create or load your Stremio token. Please check MongoDB and try /start again.",
+                    quote=True,
+                )
+
             await message.reply_text(
                 '🎉 <b>Welcome to the Telegram Stremio Media Server!</b>\n\n'
                 'Here is your personal Stremio Addon link:\n\n'
@@ -80,6 +96,12 @@ async def send_start_message(client: Client, message: Message):
         if token_doc and "token" in token_doc:
             token_str = token_doc["token"]
             addon_url = f"{base_url}/stremio/{token_str}/manifest.json"
+
+        if not addon_url:
+            return await message.reply_text(
+                "⚠️ No Stremio token is linked to this account. Please contact the administrator.",
+                quote=True,
+            )
 
         await message.reply_text(
             '🎉 <b>Welcome back to the Telegram Stremio Subscription Manager!</b>\n\n'

@@ -5,6 +5,7 @@ from asyncio import create_task
 import asyncio
 from bson import ObjectId
 import motor.motor_asyncio
+import certifi
 from datetime import datetime, timezone
 from pydantic import ValidationError
 from pymongo import ASCENDING, DESCENDING, ReturnDocument
@@ -31,6 +32,29 @@ def convert_objectid_to_str(document: Dict[str, Any]) -> Dict[str, Any]:
         elif isinstance(value, dict):
             document[key] = convert_objectid_to_str(value)
     return document
+
+
+def _mongo_client_options() -> Dict[str, Any]:
+    """Common Motor options for Hugging Face/Render style networks.
+
+    Atlas can occasionally close TLS handshakes on cold/shared containers.
+    Keep timeouts bounded and enable retryable writes where the URI does not
+    already override them.
+    """
+    return {
+        "serverSelectionTimeoutMS": 20000,
+        "connectTimeoutMS": 20000,
+        "socketTimeoutMS": 45000,
+        "maxPoolSize": 50,
+    }
+
+
+def _mongo_client(uri: str) -> motor.motor_asyncio.AsyncIOMotorClient:
+    options = _mongo_client_options()
+    uri_text = str(uri or "").lower()
+    if uri_text.startswith("mongodb+srv://") or "tls=true" in uri_text or "ssl=true" in uri_text:
+        options.setdefault("tlsCAFile", certifi.where())
+    return motor.motor_asyncio.AsyncIOMotorClient(uri, **options)
 
 
 def _catalog_item_key(item: dict) -> tuple[str, int, int]:
@@ -109,7 +133,7 @@ class Database:
     async def connect(self):
         try:
             for index, uri in enumerate(self.db_uris):
-                client = motor.motor_asyncio.AsyncIOMotorClient(uri)
+                client = _mongo_client(uri)
                 db_key = "tracking" if index == 0 else f"storage_{index}"
                 self.clients[db_key] = client
                 self.dbs[db_key] = client[self.db_name]
@@ -171,7 +195,7 @@ class Database:
 
     async def connect_storage_db(self, uri: str, index: int) -> bool:
         try:
-            client = motor.motor_asyncio.AsyncIOMotorClient(uri)
+            client = _mongo_client(uri)
             await client.admin.command("ping")
 
             db_key = "tracking" if index == 0 else f"storage_{index}"
@@ -2171,37 +2195,53 @@ class Database:
         return result.modified_count > 0
 
     async def update_token_usage(self, token: str, bytes_delta: int):
+        if not token or bytes_delta <= 0:
+            return
+
         today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         month_str = datetime.now(timezone.utc).strftime("%Y-%m")
-        
-        token_doc = await self.dbs["tracking"]["api_tokens"].find_one({"token": token})
-        if not token_doc:
-             return
+        collection = self.dbs["tracking"]["api_tokens"]
 
-        current_daily = token_doc.get("usage", {}).get("daily", {})
-        if current_daily.get("date") != today_str:
-            await self.dbs["tracking"]["api_tokens"].update_one(
-                {"token": token},
-                {"$set": {"usage.daily": {"date": today_str, "bytes": 0}}}
-            )
+        # Keep this path resilient: stream usage updates happen repeatedly
+        # while users are watching. A temporary Atlas TLS/handshake timeout
+        # should be retried instead of surfacing as noisy ERROR logs.
+        last_error = None
+        for attempt in range(3):
+            try:
+                token_doc = await collection.find_one(
+                    {"token": token},
+                    {"usage.daily.date": 1, "usage.monthly.month": 1},
+                )
+                if not token_doc:
+                    return
 
-        current_monthly = token_doc.get("usage", {}).get("monthly", {})
-        if current_monthly.get("month") != month_str:
-            await self.dbs["tracking"]["api_tokens"].update_one(
-                {"token": token},
-                {"$set": {"usage.monthly": {"month": month_str, "bytes": 0}}}
-            )
-
-        await self.dbs["tracking"]["api_tokens"].update_one(
-            {"token": token},
-            {
-                "$inc": {
-                    "usage.total_bytes": bytes_delta,
-                    "usage.daily.bytes": bytes_delta,
-                    "usage.monthly.bytes": bytes_delta
+                update_doc = {
+                    "$inc": {
+                        "usage.total_bytes": bytes_delta,
+                        "usage.daily.bytes": bytes_delta,
+                        "usage.monthly.bytes": bytes_delta,
+                    }
                 }
-            }
-        )
+                set_doc = {}
+
+                current_daily = token_doc.get("usage", {}).get("daily", {})
+                if current_daily.get("date") != today_str:
+                    set_doc["usage.daily"] = {"date": today_str, "bytes": 0}
+
+                current_monthly = token_doc.get("usage", {}).get("monthly", {})
+                if current_monthly.get("month") != month_str:
+                    set_doc["usage.monthly"] = {"month": month_str, "bytes": 0}
+
+                if set_doc:
+                    await collection.update_one({"token": token}, {"$set": set_doc})
+
+                await collection.update_one({"token": token}, update_doc)
+                return
+            except Exception as exc:
+                last_error = exc
+                await asyncio.sleep(0.5 * (attempt + 1))
+
+        raise last_error
 
     async def update_api_token_limits(self, token: str, daily_limit_gb: float, monthly_limit_gb: float) -> bool:
         result = await self.dbs["tracking"]["api_tokens"].update_one(

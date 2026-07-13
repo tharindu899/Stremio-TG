@@ -4,7 +4,7 @@ emoji: 🎬
 colorFrom: blue
 colorTo: purple
 sdk: docker
-app_port: 7860
+app_port: 8000
 pinned: false
 ---
 
@@ -44,6 +44,8 @@ pinned: false
 * [⚙️ How It Works](#️-how-it-works)
   * [📖 Overview](#overview)
   * [📤 Upload Guidelines](#upload-guidelines)
+  * [🧹 Automatic Caption Formatting](#-automatic-caption-formatting)
+  * [🎬 OVA & Special Episodes](#-ova--special-episodes-season-0)
   * [🔁 Quality Replacement Logic](#-quality-replacement-logic)
   * [🎥 Updating CAMRip or Low-Quality Files](#-updating-camrip-or-low-quality-files)
   * [🏷️ Fixing Incorrect Metadata](#️-fixing-incorrect-metadata-manual-override)
@@ -81,6 +83,9 @@ pinned: false
 This project is a **next-generation Telegram Stremio Media Server** that allows you to **stream your Telegram files directly through Stremio**, without any third-party dependencies or file expiration issues. It's designed for **speed, scalability, and reliability**, making it ideal for both personal and community-based media hosting.
 
 
+> **Current custom build:** Hugging Face port `8000`, OVA/Special `S00E01` support, automatic bold filename captions, advertisement-text cleanup, raw/split-ZIP streaming, TMDb/BASE_URL environment repair, and Userbot-first Replace Mode deletion.
+
+
 ## ✨ Key Features
 
 - ⚙️ **Multiple MongoDB Database Support**
@@ -88,6 +93,9 @@ This project is a **next-generation Telegram Stremio Media Server** that allows 
 - ⚡ **Ultra-Fast Streaming Experience**
 - 🔑 **Multi-Token Load Balancer**
 - 🎬 **IMDb & TMDb Metadata Integration**
+- 🎭 **OVA / Special Episode Support** — season-zero filenames such as `S00E01` stay in Season 0
+- 🧹 **Automatic Caption Cleanup** — keeps the first supported filename, removes advertisement text, and formats it in bold
+- 📄 **Filename Caption Fallback** — uploads with no caption automatically receive their Telegram filename
 - 🧩 **Seamless Split File Streaming Support**
 - 🎞️ **Play Multi-Part Videos as a Single Stream**
 - ♾️ **Permanent Streaming Links (No Expiration)**
@@ -97,6 +105,7 @@ This project is a **next-generation Telegram Stremio Media Server** that allows 
 - 📚 **Custom & Automatic Catalog Generation**
 - 🌐 **Built-in Addon Proxy Support**
 - 🔍 **Global Search Across Selected Channels**
+- 👤 **Userbot-First Replace Deletion** — uses `USER_SESSION_STRING` first, then falls back to the bot
 - 🔤 **Subtitle Indexing & Stremio Subtitle Resource**
 - 📩 **Owner-PM Upload Status** — compact file processing status sent privately to the configured owner
 - 🛠️ **Tools Page** — channel scan, DB integrity check, dead-link purge, speed test
@@ -126,7 +135,7 @@ When you **forward Telegram files** (movies or TV episodes) to your **AUTH CHANN
 
 ### Upload Guidelines
 
-To ensure proper metadata extraction and seamless integration with **Stremio**, all uploaded Telegram media files **must include specific details** in their captions.
+For the best metadata match, use a clear media filename in the Telegram caption or document filename. The bot reads the caption first and falls back to the real Telegram filename when needed.
 
 #### 🎥 For Movies
 
@@ -162,6 +171,84 @@ Harikatha.Sambhavami.Yuge.Yuge.S01E04.Dark.Hours.1080p.WEB-DL.DUAL.DDP5.1.Atmos.
 ✅ **Optional:** Include episode title, codec, or audio details (e.g., `WEB-DL`, `DDP5.1`, `Dual Audio`).
 
 
+### 🧹 Automatic Caption Formatting
+
+For every supported media or subtitle upload, the bot looks for the **first supported filename** in the caption. Everything after the detected extension is ignored, so channel advertisements, donation messages, and unrelated notes do not enter metadata parsing.
+
+**Incoming caption:**
+
+```text
+Toukutsu Ou  - 01 [SLAnimebay][1080p x265].mkv
+
+🛑 Please support us to keep this service alive by making a small donation
+@AnimebaySL
+
+Toukutsu Ou  - 01 [SLAnimebay][1080p x265].mkv
+```
+
+**Caption saved by the bot:**
+
+```html
+<b>Toukutsu Ou  - 01 [SLAnimebay][1080p x265].mkv</b>
+```
+
+Caption rules:
+
+- If the caption contains a supported filename, only that first filename is kept and displayed in **bold**.
+- If the upload has **no caption**, the real Telegram document filename is added in **bold**.
+- If a non-empty custom caption contains no supported filename, the bot leaves that custom caption unchanged.
+- HTML-sensitive characters in filenames are escaped safely before Telegram caption editing.
+- The same caption-first → filename-fallback logic is used for live uploads and channel rescans.
+
+**Supported video extensions:**
+
+```text
+.mkv .mp4 .avi .ts .m4v .mov .wmv .webm .flv .mpeg .mpg
+```
+
+**Supported subtitle extensions:**
+
+```text
+.srt .vtt .ass .ssa .sub .smi .sami
+```
+
+**Supported split examples:**
+
+```text
+Movie.2026.1080p.mkv.001
+Movie.2026.1080p.mkv.zip.001
+Movie.2026.1080p.mkv.z01
+Movie.2026.1080p.zip.001
+```
+
+> Metadata override links/tags already present in the original caption are still available to the internal metadata workflow where applicable, while the visible caption is normalized to the filename.
+
+---
+
+### 🎬 OVA & Special Episodes (Season 0)
+
+OVA, special, extra, bonus, and recap episodes can be uploaded using normal Stremio season-zero notation:
+
+```text
+Demon Slayer S00E01 1080p WEB-DL.mkv
+Attack on Titan (2013) S00E01 1080p WEB-DL.mkv
+```
+
+The parser preserves `season_number = 0`, so these files are indexed as **Season 0 / Specials** instead of being converted to Season 1 or treated as movies.
+
+Recommended format:
+
+```text
+Show Name S00E01 Quality Source.ext
+```
+
+- `S00` = Season 0 / Specials / OVA
+- `E01` = Special episode number
+- Resolution is recommended but not mandatory; files without a detected resolution are indexed with **Unknown** quality.
+
+---
+
+
 ### 🔁 Quality Replacement Logic
 
 > Works only when **Replace Mode** is enabled.
@@ -171,6 +258,15 @@ If a newly uploaded file has the same quality label (`720p`, `1080p`, `4K`, etc.
 **Example:** Uploading a new `Ghosted (2023) 720p` file will replace the existing `720p` version in the catalog.
 
 This prevents duplicate quality entries and ensures only the latest version is available for streaming.
+
+#### Delete client priority
+
+When `USER_SESSION_STRING` is configured and the user session is usable, Replace Mode deletes older Telegram source messages in this order:
+
+1. **Userbot first** — the authenticated user session attempts the deletion.
+2. **Stream Bot fallback** — used only when the Userbot is unavailable or the Userbot deletion fails.
+
+Without a usable `USER_SESSION_STRING`, the Stream Bot handles deletions directly. This avoids unnecessary `MESSAGE_DELETE_FORBIDDEN` warnings in channels where the user account can delete older posts but the bot cannot delete messages it did not create.
 
 ---
 
@@ -532,7 +628,7 @@ Fill in these values:
 | `OWNER_ID` | ✅ | Your numeric Telegram user ID |
 | `DATABASE` | ✅ | **Two** MongoDB URIs, separated by a comma |
 | `PORT` | ✅ | Web server port (keep `8000` unless it's busy) |
-| `USER_SESSION_STRING` | ⬜ | Optional — only needed for **Global Search** |
+| `USER_SESSION_STRING` | ⬜ | Optional but recommended — enables **Global Search**, Userbot fallback operations, and Userbot-first Replace Mode deletion |
 | `ADMIN_USERNAME` | ⬜ | Recommended admin login name; when paired with `ADMIN_PASSWORD`, it can recover an old saved login |
 | `ADMIN_PASSWORD` | ⬜ | Recommended admin password; set it as a secret, never commit it |
 
@@ -596,7 +692,7 @@ You need **two** free MongoDB databases — the first stores tracking/metadata, 
 Leave it as `8000` unless that port is already in use. Your reverse proxy / domain will point here.
 
 ### 📱 USER_SESSION_STRING (optional)
-Only needed if you want **Global Search**. It's safe and quick to generate — see **Step 3** below. If you don't need Global Search, leave it empty.
+Recommended when you want **Global Search** or want Replace Mode to delete older channel posts through your Telegram user account before trying the bot. See **Step 3** below. Leave it empty only when neither feature is needed.
 
 ---
 
@@ -605,7 +701,7 @@ Only needed if you want **Global Search**. It's safe and quick to generate — s
 > 😊 **No app installation required — and it's safe.**
 > A session string is simply a "stay logged in" token for **your own** Telegram account, exactly like signing into Telegram Web. The bot never sees your password, and you can revoke access anytime from **Telegram → Settings → Devices**.
 
-> ⏭️ **Skip this step** entirely if you don't plan to use Global Search.
+> ⏭️ **Skip this step** only if you do not need Global Search and do not want Userbot-first deletion for Replace Mode.
 
 ### 🌐 Recommended Method: Google Colab (works in a phone browser)
 
@@ -664,7 +760,7 @@ Everything below is stored in the database and applied **instantly — no restar
 | Field | What to enter |
 | :--- | :--- |
 | **TMDB API Key** | A free TMDB **v3** key from themoviedb.org → Settings → API. Powers automatic metadata matching and auto-catalog sync. |
-| **Base URL** | Your public address, e.g. `https://your-domain.com`. **Important:** Stremio uses this to reach your streams. |
+| **Base URL** | Your public address, e.g. `https://your-domain.com`. Hugging Face builds can auto-detect `SPACE_HOST` when this is blank, but saving the correct public URL is still recommended. |
 | **Upstream Repo / Branch** | Optional — used by `/restart` to auto-update (e.g. repo `weebzone/Telegram-Stremio`, branch `master`). |
 
 ### 💳 Subscription (optional)
@@ -717,152 +813,100 @@ Follow the instructions provided in the Google Colab Tool to deploy on Heroku.
 
 ## 🤗 Hugging Face Spaces Guide
 
-Hugging Face Spaces supports Docker-based deployments and gives you a free persistent URL — no credit card required. The free CPU tier is enough for personal use.
+This repository is already configured as a Docker Space and uses **port `8000`** consistently:
 
-> ⚠️ **Limitations to know before you start:**
-> - The container runs as a **non-root user (UID 1000)** — the project Dockerfile needs a small tweak (shown below).
-> - Spaces expose a **single public port: 7860** — different from the default `8000`.
-> - Secrets (like `BOT_TOKEN`, `DATABASE`) must be added via the Space's **Variables & secrets** tab, not committed to the repo.
-> - **Public Spaces** make your code and logs visible to everyone — use a **Private Space** to keep your config and code hidden.
+- `README.md` YAML: `app_port: 8000`
+- `sample_config.env`: `PORT="8000"`
+- Backend default: `PORT=8000`
 
----
+> Do not change only one of these values. A mismatch between the Hugging Face `app_port` and the Uvicorn port causes the Space health check to fail and can leave the Space in a **Restarting** loop.
 
-### 1️⃣ Step 1: Create a Hugging Face Space
+### 1️⃣ Create the Space
 
-1. Go to **https://huggingface.co/new-space**.
-2. Choose a **Space name** (e.g. `telegram-stremio`).
-3. Set **SDK** to **Docker**.
-4. Set visibility to **Private** (recommended — keeps your repo and logs private).
-5. Click **Create Space**.
+1. Open Hugging Face and create a new **Docker** Space.
+2. Use **Private** visibility when possible because logs and repository files may contain operational details.
+3. Upload or push the complete repository, including the YAML block at the top of this README.
 
----
+### 2️⃣ Add Variables and Secrets
 
-### 2️⃣ Step 2: Clone the Space & Add Project Files
+Open **Space → Settings → Variables and secrets** and add:
 
-```bash
-git clone https://huggingface.co/spaces/<your-hf-username>/telegram-stremio
-cd telegram-stremio
+| Name | Type | Required | Value |
+| :--- | :--- | :---: | :--- |
+| `API_ID` | Secret | ✅ | Telegram API ID |
+| `API_HASH` | Secret | ✅ | Telegram API Hash |
+| `BOT_TOKEN` | Secret | ✅ | Main bot token |
+| `OWNER_ID` | Variable/Secret | ✅ | Numeric Telegram user ID |
+| `DATABASE` | Secret | ✅ | Tracking and storage MongoDB URIs separated by a comma |
+| `PORT` | Variable | ✅ | `8000` |
+| `USER_SESSION_STRING` | Secret | ⬜ | Global Search and Userbot-first deletion |
+| `TMDB_API` | Secret | ⬜ | TMDb v3 API key; can repair a blank DB setting on startup |
+| `BASE_URL` | Variable | ⬜ | Full Space URL; otherwise `SPACE_HOST` is auto-detected |
+| `ADMIN_USERNAME` | Secret | ⬜ | Admin panel username |
+| `ADMIN_PASSWORD` | Secret | ⬜ | Admin panel password |
+
+### 3️⃣ Deploy
+
+Push the repository to the Space. A healthy startup log should include:
+
+```text
+Telegram-Stremio Started Successfully!
+Application startup complete.
+Uvicorn running on http://0.0.0.0:8000
 ```
 
-Copy all project files into this directory (or push your fork directly):
+Database success is shown separately:
 
-```bash
-# From your existing Telegram-Stremio clone:
-cp -r /path/to/Telegram-Stremio/. .
+```text
+Tracking Database connected successfully
+Storage 1 Database connected successfully
 ```
 
----
+### 4️⃣ Configure Runtime Settings
 
-### 3️⃣ Step 3: Create an HF-Compatible Dockerfile
+After the Space is running:
 
-Hugging Face requires the container to run as **UID 1000** and listen on **port 7860**. Create or replace the root `Dockerfile` with:
+1. Open the Space URL and sign in to the web panel.
+2. Open **Settings**.
+3. Save the **TMDb API key**, **Base URL**, AUTH channels, and other runtime settings.
+4. Empty MongoDB runtime values can be repaired from non-empty `TMDB_API`, `BASE_URL`, or Hugging Face `SPACE_HOST` environment values on startup. Non-empty WebUI values remain authoritative.
 
-```dockerfile
-FROM ghcr.io/astral-sh/uv:debian-slim
+### 5️⃣ Install the Addon
 
-ENV DEBIAN_FRONTEND=noninteractive
-ENV PYTHONUNBUFFERED=1
-ENV LANG=en_US.UTF-8
-ENV PATH="/app/.venv/bin:$PATH"
+The root route below is **not** the addon manifest and may return `404`:
 
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        build-essential bash git curl ca-certificates locales && \
-    locale-gen en_US.UTF-8 && \
-    rm -rf /var/lib/apt/lists/* && \
-    useradd -m -u 1000 user
-
-WORKDIR /app
-COPY --chown=user . .
-
-RUN uv lock && uv sync --locked && chmod +x start.sh
-
-USER user
-ENV HOME=/home/user
-ENV PORT=7860
-
-CMD ["bash", "start.sh"]
+```text
+https://your-space.hf.space/manifest.json
 ```
 
-> The only differences from the original Dockerfile are: the `useradd` step, `--chown=user` on COPY, switching to `USER user`, and setting `PORT=7860`.
+Use the personal tokenized manifest URL returned by the bot or web panel:
 
----
+```text
+https://your-space.hf.space/stremio/YOUR_TOKEN/manifest.json
+```
 
-### 4️⃣ Step 4: Add Secrets via Space Settings
+### 🔁 Updating the Space
 
-**Never commit `config.env` to Hugging Face** — it would be visible in your repo. Instead:
-
-1. Open your Space → **Settings** tab → **Variables and secrets**.
-2. Add each required value as a **Secret** (encrypted, hidden from logs):
-
-| Secret Name | Value |
-| :--- | :--- |
-| `API_ID` | Your Telegram API ID |
-| `API_HASH` | Your Telegram API Hash |
-| `BOT_TOKEN` | Your bot token |
-| `OWNER_ID` | Your Telegram user ID |
-| `DATABASE` | Two MongoDB URIs, comma-separated |
-| `PORT` | `7860` |
-| `USER_SESSION_STRING` | *(optional — for Global Search; generate it in the [Colab session tool](https://colab.research.google.com/github/rjriajul/session/blob/main/user_tgsess.ipynb))* |
-| `ADMIN_USERNAME` | Your chosen admin username (recommended) |
-| `ADMIN_PASSWORD` | Your chosen admin password (recommended) |
-
-> Secrets are injected as environment variables at runtime. The app reads them via `python-dotenv` + `os.getenv`, so they work identically to `config.env`.
-
----
-
-### 5️⃣ Step 5: Push & Deploy
+Push a new commit to trigger a rebuild:
 
 ```bash
 git add .
-git commit -m "Deploy to Hugging Face Spaces"
+git commit -m "Update Telegram-Stremio"
 git push
 ```
 
-The Space will automatically build and start. Watch the **Logs** tab for progress. Once it shows **Running**, your server is live at:
+The startup script runs the repository updater before starting the backend. Keep the repository structure intact when uploading ZIP contents.
 
-```
-https://<your-hf-username>-telegram-stremio.hf.space
-```
+### 📋 Hugging Face Troubleshooting
 
----
-
-### 6️⃣ Step 6: Set BASE_URL
-
-Once your Space is running, open the web panel and go to **Settings → Media & Content**:
-
-- Set **Base URL** to your Space URL:
-  ```
-  https://<your-hf-username>-telegram-stremio.hf.space
-  ```
-
-This is the URL Stremio uses to reach your streams — it must be set correctly before adding the addon.
-
----
-
-### 🔁 Updating the Deployment
-
-Push new commits to trigger an automatic rebuild:
-
-```bash
-git pull origin master   # pull upstream updates
-git push                  # triggers a Space rebuild automatically
-```
-
-Or use the `/restart` bot command (if `UPSTREAM_REPO` and `UPSTREAM_BRANCH` are set in web settings) to auto-update without touching git.
-
----
-
-### 📋 HF Spaces Quick Reference
-
-| Topic | Detail |
+| Log or symptom | Meaning / action |
 | :--- | :--- |
-| **Port** | Must be `7860` — set `PORT=7860` in Secrets |
-| **Free tier** | 2 vCPU, 16 GB RAM — sufficient for personal / small community use |
-| **Persistent storage** | Free tier has no persistent `/data` volume — MongoDB Atlas handles all data, so this doesn't matter for this project |
-| **Sleep policy** | Free public Spaces sleep after inactivity; **Private Spaces stay awake** |
-| **Custom domain** | Available on paid tiers; otherwise the `.hf.space` URL is permanent |
-| **Logs** | Visible in the **Logs** tab of your Space page |
+| Space remains **Restarting** | Confirm both `app_port` and `PORT` are `8000` |
+| `tmdb_api=empty` or TMDb `401 Unauthorized` | Add a valid TMDb v3 API key |
+| `base_url=empty` | Add `BASE_URL`; on HF, `SPACE_HOST` can also supply it automatically |
+| `GET /manifest.json 404` | Use `/stremio/YOUR_TOKEN/manifest.json` instead |
+| DB connection timeout | Check Atlas password, network access, DNS, and MongoDB availability |
+| `MESSAGE_DELETE_FORBIDDEN` from bot | Configure a valid `USER_SESSION_STRING`; the build tries Userbot first |
 
 
 ## 🐳 VPS Guide
@@ -1021,9 +1065,9 @@ Download Nuvio from an official source:
 
 | Deployment Method | Addon URL |
 | :--- | :--- |
-| **Heroku** | `https://<your-heroku-app>.herokuapp.com/stremio/manifest.json` |
-| **Hugging Face Spaces** | `https://<your-hf-username>-telegram-stremio.hf.space/stremio/manifest.json` |
-| **Custom Domain (VPS)** | `https://<your-domain>/stremio/manifest.json` |
+| **Heroku** | `https://<your-heroku-app>.herokuapp.com/stremio/YOUR_TOKEN/manifest.json` |
+| **Hugging Face Spaces** | `https://<your-hf-username>-telegram-stremio.hf.space/stremio/YOUR_TOKEN/manifest.json` |
+| **Custom Domain (VPS)** | `https://<your-domain>/stremio/YOUR_TOKEN/manifest.json` |
 
 3. Done! 🎉 Your Telegram library now appears in the catalog and streams directly.
 

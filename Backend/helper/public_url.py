@@ -6,6 +6,7 @@ public request host safely.
 """
 from __future__ import annotations
 
+from os import getenv
 from typing import Optional
 from urllib.parse import quote, urlsplit
 
@@ -34,9 +35,22 @@ def _valid_https_base(value: str) -> Optional[str]:
     return f"https://{parsed.netloc}{parsed.path.rstrip('/')}".rstrip("/")
 
 
+def configured_public_base_url() -> Optional[str]:
+    """Return a configured/deployment public URL without requiring a request."""
+    configured = _valid_https_base(SettingsManager.current().base_url)
+    if configured:
+        return configured
+
+    space_host = (getenv("SPACE_HOST") or "").strip().strip("/")
+    if space_host:
+        candidate = space_host if space_host.startswith(("http://", "https://")) else f"https://{space_host}"
+        return _valid_https_base(candidate)
+    return None
+
+
 def public_base_url(request) -> str:
     """Return the configured HTTPS URL or reconstruct the public proxy URL."""
-    configured = _valid_https_base(SettingsManager.current().base_url)
+    configured = configured_public_base_url()
     if configured:
         return configured
 
