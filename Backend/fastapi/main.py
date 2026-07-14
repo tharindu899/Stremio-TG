@@ -92,9 +92,9 @@ async def pwa_service_worker():
 
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
-    return FileResponse(
-        "Backend/fastapi/static/icons/favicon.ico",
-        media_type="image/x-icon",
+    return RedirectResponse(
+        url="https://i.ibb.co/hFJmzH2c/logo.png",
+        status_code=307,
         headers={"Cache-Control": "public, max-age=86400"},
     )
 

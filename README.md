@@ -9,7 +9,7 @@ pinned: false
 ---
 
 <p align="center">
-  <img src="https://iili.io/CAptcXV.md.png" alt="Logo" width="400"/>
+  <img src="https://i.ibb.co/ymjGkH2H/banner.png" alt="TG Stremio Banner" width="900"/>
 </p>
 
 

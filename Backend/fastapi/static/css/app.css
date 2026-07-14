@@ -48,6 +48,7 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .rail-brand { position: relative; display: grid; width: 56px; height: 56px; place-items: center; margin: 0 auto 22px; border: 1px solid color-mix(in srgb, var(--primary) 42%, var(--line)); border-radius: 15px; background: linear-gradient(145deg, color-mix(in srgb,var(--primary) 18%,var(--surface-1)), var(--surface-1)); box-shadow: inset 0 1px 0 rgba(255,255,255,.05), var(--shadow-soft); }
 .rail-brand-mark { display:grid; width:32px; height:32px; place-items:center; color:#fff; border-radius:10px; background: linear-gradient(135deg, var(--primary), var(--secondary)); box-shadow: 0 7px 15px color-mix(in srgb, var(--primary) 28%, transparent); }
 .rail-brand-mark i { font-size: 12px; transform: translateX(1px); }
+.rail-brand-mark img { width:100%; height:100%; object-fit:cover; border-radius:inherit; display:block; }
 .rail-brand-pulse { position:absolute; right:7px; bottom:7px; width:8px; height:8px; border-radius:99px; border:2px solid var(--surface-1); background:var(--positive); }
 .rail-nav { display:flex; flex:1; flex-direction:column; align-items:center; gap: 10px; overflow-y:auto; scrollbar-width:none; }
 .rail-nav::-webkit-scrollbar { display:none; }
