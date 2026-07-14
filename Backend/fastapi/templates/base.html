@@ -12,8 +12,8 @@
 <meta name="apple-mobile-web-app-title" content="TG Stremio">
 <meta name="msapplication-TileColor" content="#101a2c">
 <link rel="manifest" href="/manifest.webmanifest">
-<link rel="icon" type="image/png" sizes="192x192" href="https://i.ibb.co/hFJmzH2c/logo.png">
-<link rel="apple-touch-icon" sizes="180x180" href="https://i.ibb.co/hFJmzH2c/logo.png">
+<link rel="icon" type="image/png" sizes="192x192" href="https://i.ibb.co/LXmcRTFC/icon.jpg">
+<link rel="apple-touch-icon" sizes="180x180" href="https://i.ibb.co/LXmcRTFC/icon.jpg">
 <meta name="tg-ui-version" content="3.6.10">
 <title>{% block title %}TG Stremio{% endblock %}</title>
 <script src="https://cdn.tailwindcss.com"></script>
@@ -31,7 +31,7 @@
 {% if current_user %}
 <div class="studio-shell">
   <aside id="app-sidebar" class="command-rail" aria-label="Primary navigation">
-    <a href="/" class="rail-brand" aria-label="TG Stremio home"><span class="rail-brand-mark"><img src="https://i.ibb.co/hFJmzH2c/logo.png" alt="TG Stremio"></span><span class="rail-brand-pulse"></span><span class="sr-only">TG Stremio</span></a>
+    <a href="/" class="rail-brand" aria-label="TG Stremio home"><span class="rail-brand-mark"><img src="https://i.ibb.co/LXmcRTFC/icon.jpg" alt="TG Stremio"></span><span class="rail-brand-pulse"></span><span class="sr-only">TG Stremio</span></a>
     <nav class="rail-nav" aria-label="Workspace">
       <div class="rail-group">
         <span class="rail-caption">Workspace</span>
@@ -75,7 +75,7 @@
     <main id="app-main" class="studio-main">
 {% else %}
 <div class="public-shell">
-  <header class="public-header"><a href="/" class="public-brand"><span class="rail-brand-mark"><img src="https://i.ibb.co/hFJmzH2c/logo.png" alt="TG Stremio"></span><span><strong>TG Stremio</strong><small>Media control room</small></span></a><span class="public-secure"><span class="status-signal"></span> Secure workspace</span></header>
+  <header class="public-header"><a href="/" class="public-brand"><span class="rail-brand-mark"><img src="https://i.ibb.co/LXmcRTFC/icon.jpg" alt="TG Stremio"></span><span><strong>TG Stremio</strong><small>Media control room</small></span></a><span class="public-secure"><span class="status-signal"></span> Secure workspace</span></header>
   <main id="app-main" class="public-main">
 {% endif %}
 {% block content %}{% endblock %}
@@ -87,7 +87,7 @@
 
 <aside id="mobileDrawer" class="mobile-panel" aria-label="Navigation" aria-hidden="true">
   <div class="mobile-panel-head">
-    <a href="/" class="mobile-panel-brand"><span class="rail-brand-mark"><img src="https://i.ibb.co/hFJmzH2c/logo.png" alt="TG Stremio"></span><span><strong>TG Stremio</strong><small>Control room</small></span></a>
+    <a href="/" class="mobile-panel-brand"><span class="rail-brand-mark"><img src="https://i.ibb.co/LXmcRTFC/icon.jpg" alt="TG Stremio"></span><span><strong>TG Stremio</strong><small>Control room</small></span></a>
     <button id="mobileDrawerClose" class="header-icon" type="button" aria-label="Close navigation"><i class="fa-solid fa-xmark"></i></button>
   </div>
   <div class="mobile-panel-user"><span class="profile-avatar large">{{ (current_user or 'A')[:1]|upper }}</span><div><strong>{{ current_user }}</strong><small><span class="status-signal"></span> System ready</small></div></div>
