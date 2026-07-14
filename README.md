@@ -9,7 +9,7 @@ pinned: false
 ---
 
 <p align="center">
-  <img src="https://i.ibb.co/842JqDxn/banner.jpg" alt="TG Stremio Banner" width="900"/>
+  <img src="https://i.ibb.co/chBJsDyF/banner.png" alt="TG Stremio Banner" width="900"/>
 </p>
 
 

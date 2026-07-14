@@ -10,7 +10,7 @@
   "background_color": "#101a2c",
   "theme_color": "#101a2c",
   "icons": [
-    {"src": "https://i.ibb.co/LXmcRTFC/icon.jpg", "sizes": "192x192", "type": "image/jpeg", "purpose": "any maskable"},
-    {"src": "https://i.ibb.co/LXmcRTFC/icon.jpg", "sizes": "512x512", "type": "image/jpeg", "purpose": "any maskable"}
+    {"src": "https://i.ibb.co/HT0BLkqV/logo.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
+    {"src": "https://i.ibb.co/HT0BLkqV/logo.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
   ]
 }
