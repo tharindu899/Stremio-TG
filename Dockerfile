@@ -18,6 +18,7 @@ RUN apt-get update && \
 
 WORKDIR /app
 COPY . .
-RUN uv sync
+RUN uv lock
+RUN uv sync --locked
 RUN chmod +x start.sh
-CMD ["python", "-m", "Backend"]
+CMD ["bash", "start.sh"]

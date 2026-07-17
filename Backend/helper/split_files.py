@@ -10,7 +10,7 @@ from dataclasses import dataclass
 import re
 from typing import Optional, Tuple
 
-_VIDEO_EXTENSIONS = "mkv|mp4|avi|ts|m4v|mov|wmv|webm|flv|mpeg|mpg"
+_VIDEO_EXTENSIONS = "mkv|mp4|avi|ts|m4v|mov|wmv|webm|flv|m2ts|mpeg|mpg"
 _VIDEO_EXT_RE = re.compile(rf"(?i)\.({_VIDEO_EXTENSIONS})$")
 _NORMALIZE_RE = re.compile(r"[^a-z0-9]+", re.I)
 
@@ -333,10 +333,17 @@ def resolve_legacy_bare_split_candidates(
     return resolved
 
 
+def _database_group_key(info: SplitFileInfo) -> str:
+    """Keep old test-repo raw split keys stable while namespacing ZIP sets."""
+    if info.kind == "raw" and info.group_key.startswith("raw:"):
+        return info.group_key[4:]
+    return info.group_key
+
+
 def parse_split_info(filename: str) -> Optional[Tuple[str, int]]:
     """Backward-compatible `(group_key, part_number)` helper."""
     info = detect_split_file(filename)
-    return (info.group_key, info.part_number) if info else None
+    return (_database_group_key(info), info.part_number) if info else None
 
 
 def strip_part_suffix(filename: str) -> str:
@@ -425,8 +432,38 @@ def detect_split_upload(filename: object, mime_type: object = "") -> Optional[Sp
 def split_metadata_fields(channel: int, quality: object, info: SplitFileInfo) -> dict:
     """Return the canonical database metadata for one split part."""
     return {
-        "group_key": f"{int(channel)}:{str(quality or 'HD')}:{info.group_key}",
+        "group_key": f"{int(channel)}:{str(quality or 'HD')}:{_database_group_key(info)}",
         "part_number": info.part_number,
         "split_kind": info.kind,
         "media_filename": info.media_filename,
     }
+
+
+# Combined/whole-season media support retained from test-repo.
+_COMBINED_EPISODES_RE = re.compile(
+    r"E(?:P|PISODE)?[\s._-]*0*(\d{1,4})[\s._-]*(?:-|–|~|\+|&|,|to)+[\s._-]*(?:E(?:P|PISODE)?[\s._-]*)?0*(\d{1,4})(?=\D|$)",
+    re.IGNORECASE,
+)
+_COMBINED_SEASON_RE = re.compile(r"S(?:EASON)?[\s._-]*0*(\d{1,3})", re.IGNORECASE)
+_COMBINED_KEYWORD_RE = re.compile(r"\bcombined\b", re.IGNORECASE)
+
+
+def _combined_season(name: str) -> Optional[int]:
+    match = _COMBINED_SEASON_RE.search(name or "")
+    return int(match.group(1)) if match else None
+
+
+def parse_combined_episodes(filename: str) -> Optional[dict]:
+    """Detect E01-E04 ranges and whole-season/Combined uploads."""
+    if not filename:
+        return None
+    match = _COMBINED_EPISODES_RE.search(filename)
+    if match:
+        start, end = int(match.group(1)), int(match.group(2))
+        if 1 <= start < end <= 9999:
+            return {"season": _combined_season(filename) or 1, "start": start, "end": end}
+    if _COMBINED_KEYWORD_RE.search(filename):
+        season = _combined_season(filename)
+        if season is not None:
+            return {"season": season, "start": None, "end": None}
+    return None

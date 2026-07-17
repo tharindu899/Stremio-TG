@@ -1,10 +1,10 @@
 from datetime import datetime
 from typing import List, Optional
+
 from pydantic import BaseModel, Field
 
-# ---------------------------
-# Quality Detail Schema
-# ---------------------------
+
+#----- Quality detail schema
 class QualityPart(BaseModel):
     part_number: int
     chat_id: int
@@ -19,21 +19,13 @@ class QualityDetail(BaseModel):
     size: str
     group_key: Optional[str] = None
     parts: Optional[List[QualityPart]] = None
-    # raw = direct concatenated video parts; zip = split ZIP archive volumes.
     split_kind: Optional[str] = None
     media_filename: Optional[str] = None
-    # Original raw name for a temporarily normal legacy `.001.mkv` upload.
-    # It lets a later validated `.002` promote the earlier row safely even
-    # when its user-facing caption differs from the Telegram filename.
-    legacy_source_filename: Optional[str] = None
-    # Original Telegram text retained for caption/tag catalog rules.
     source_caption: Optional[str] = None
     source_filename: Optional[str] = None
 
 
-# ---------------------------
-# Episode Schema
-# ---------------------------
+#----- Episode schema
 class Episode(BaseModel):
     episode_number: int
     title: str
@@ -43,17 +35,13 @@ class Episode(BaseModel):
     telegram: Optional[List[QualityDetail]]
 
 
-# ---------------------------
-# Season Schema
-# ---------------------------
+#----- Season schema
 class Season(BaseModel):
     season_number: int
     episodes: List[Episode] = Field(default_factory=list)
 
 
-# ---------------------------
-# TV Show Schema
-# ---------------------------
+#----- TV show schema
 class TVShowSchema(BaseModel):
     tmdb_id: Optional[int] = None
     imdb_id: Optional[str] = None
@@ -71,11 +59,16 @@ class TVShowSchema(BaseModel):
     media_type: str
     updated_on: datetime = Field(default_factory=datetime.utcnow)
     seasons: List[Season] = Field(default_factory=list)
+    is_anime: Optional[bool] = False
+    original_language: Optional[str] = None
+    origin_country: Optional[List[str]] = Field(default_factory=list)
+    production_countries: Optional[List[str]] = Field(default_factory=list)
+    watch_providers: Optional[List[str]] = Field(default_factory=list)
+    auto_tags: Optional[List[str]] = Field(default_factory=list)
+    auto_catalog: Optional[dict] = None
 
 
-# ---------------------------
-# Movie Schema
-# ---------------------------
+#----- Movie schema
 class MovieSchema(BaseModel):
     tmdb_id: Optional[int] = None
     imdb_id: Optional[str] = None
@@ -93,3 +86,10 @@ class MovieSchema(BaseModel):
     media_type: str
     updated_on: datetime = Field(default_factory=datetime.utcnow)
     telegram: Optional[List[QualityDetail]]
+    is_anime: Optional[bool] = False
+    original_language: Optional[str] = None
+    origin_country: Optional[List[str]] = Field(default_factory=list)
+    production_countries: Optional[List[str]] = Field(default_factory=list)
+    watch_providers: Optional[List[str]] = Field(default_factory=list)
+    auto_tags: Optional[List[str]] = Field(default_factory=list)
+    auto_catalog: Optional[dict] = None

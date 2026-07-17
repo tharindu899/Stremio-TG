@@ -10,7 +10,7 @@ from __future__ import annotations
 from html import escape
 import re
 
-_VIDEO_EXTENSIONS = "mkv|mp4|avi|ts|m4v|mov|wmv|webm|flv|mpeg|mpg"
+_VIDEO_EXTENSIONS = "mkv|mp4|avi|ts|m4v|mov|wmv|webm|flv|m2ts|mpeg|mpg"
 _SUBTITLE_EXTENSIONS = "srt|vtt|ass|ssa|sub|smi|sami"
 
 # Order matters: split-ZIP and split-video suffixes must win before a plain
@@ -28,7 +28,7 @@ _SUPPORTED_SUFFIX_RE = re.compile(
         )?
         |\.(?:{_SUBTITLE_EXTENSIONS})
     )
-    (?=$|[\s`*_~|<>\[\](){{}}:;,!?—–-])
+    (?=$|[^A-Za-z0-9])
     """
 )
 
@@ -77,17 +77,35 @@ def extract_supported_filename(value: object) -> str:
 def preferred_caption_filename(caption: object, filename: object) -> str:
     """Choose the filename used for automatic caption formatting.
 
-    A non-empty custom caption with no supported filename is left untouched.
-    Telegram's real filename is used only when the upload has no caption, as
-    requested by the automatic-caption workflow.
+    Rules:
+    * Caption contains the real Telegram filename plus extra text: keep exactly
+      that filename, regardless of extension.
+    * Caption contains another supported media/subtitle filename: preserve that
+      caption filename and discard everything after its extension.
+    * Caption is genuine custom text with no filename: leave it untouched.
+    * Upload has no caption: add the real Telegram filename automatically.
     """
-    caption_text = str(caption or "")
-    caption_filename = extract_supported_filename(caption_text)
-    if caption_filename:
-        return caption_filename
+    caption_text = str(caption or "").replace("\u200b", "").replace("\ufeff", "")
+    real_filename = str(filename or "").strip()
+
     if caption_text.strip():
+        # The real Telegram filename is the strongest and safest boundary. This
+        # also supports uncommon extensions without accidentally truncating a
+        # normal custom caption.
+        if real_filename:
+            for original_line in caption_text.splitlines() or [caption_text]:
+                line = _clean_candidate_prefix(original_line)
+                if line.startswith(real_filename):
+                    return real_filename
+
+        caption_filename = extract_supported_filename(caption_text)
+        if caption_filename:
+            return caption_filename
+
+        # A custom caption that does not contain a filename must not be changed.
         return ""
-    return extract_supported_filename(filename) or str(filename or "").strip()
+
+    return real_filename
 
 
 def bold_caption(filename: object) -> str:

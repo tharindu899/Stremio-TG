@@ -8,37 +8,23 @@ from pyrogram.errors import FloodWait, ChannelPrivate, ChatAdminRequired
 
 from Backend.logger import LOGGER
 from Backend.helper.encrypt import encode_string, decode_string
-from Backend.helper.metadata import metadata_from_caption_or_filename
-from Backend.helper.pyro import clean_filename, get_readable_file_size, remove_urls
-from Backend.helper.caption_tools import extract_supported_filename
-from Backend.helper.subtitle_service import index_subtitle, relink_unmatched_subtitles
-from Backend.helper.subtitle_constants import is_subtitle_file
-from Backend.helper.split_files import (
-    detect_split_upload,
-    strip_part_suffix,
-    find_split_source,
-    find_legacy_bare_split_source,
-    resolve_legacy_bare_split_candidates,
-    split_metadata_fields,
-    is_video_filename,
-)
+from Backend.helper.metadata import metadata_from_caption_or_filename, extract_default_id
+from Backend.helper.pyro import clean_filename, finalize_media_name, get_readable_file_size
+from Backend.helper.skip_channel import is_skip_channel, route_to_skip_channel
+from Backend.helper.split_files import detect_split_upload, find_split_source, parse_split_info
+from Backend.helper.subtitles import ingest_subtitle, is_subtitle_file
 
+SCAN_BATCH_SIZE = 200          
+SCAN_MAX_EMPTY_BATCHES = 10    
+SCAN_MAX_ID_CAP = 1_000_000    
+SCAN_BATCH_DELAY = 0.5         
+SCAN_PERSIST_EVERY = 1         
+SCAN_PROBE_TEXT = "🔄"         
+SCAN_PROCESS_CONCURRENCY = 8   
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Tunables — kept conservative so we never trip Telegram's flood limits.
-# ─────────────────────────────────────────────────────────────────────────────
-SCAN_BATCH_SIZE = 200          # get_messages accepts up to 200 ids per call
-SCAN_MAX_EMPTY_BATCHES = 10    # stop after this many consecutive empty batches
-SCAN_MAX_ID_CAP = 1_000_000    # hard ceiling to avoid runaway loops
-# Metadata lookups are network-bound. Four workers give a major rescan speed-up
-# on small HF instances while staying well below the shared API limit of 12.
-SCAN_METADATA_CONCURRENCY = 4
-SCAN_BATCH_DELAY = 0.05        # tiny pause between Telegram fetch batches
-SCAN_PERSIST_EVERY = 1         # persist state every N batches
-
-DBCHECK_CONCURRENCY = 5        # concurrent get_messages during integrity check
-DBCHECK_BATCH_DELAY = 0.3      # seconds between concurrent groups
-DBCHECK_PAGE_SIZE = 100        # mongo pagination size
+DBCHECK_CONCURRENCY = 5        
+DBCHECK_BATCH_DELAY = 0.3      
+DBCHECK_PAGE_SIZE = 100        
 
 _STATE_COLLECTION = "scan_state"
 _SCAN_DOC_ID = "scan"
@@ -59,50 +45,44 @@ def _fmt_elapsed(seconds: float) -> str:
     return f"{s}s"
 
 
-class _OrderedBatchCommit:
-    """Keep database commits in Telegram message order.
-
-    A scan may resolve metadata for several files concurrently, but Replace Mode
-    must still see uploads in their original channel order.  Each worker waits
-    for its turn only at commit time, so slow API lookups overlap safely.
-    """
-
-    def __init__(self) -> None:
-        self._next = 0
-        self._condition = asyncio.Condition()
-
-    async def wait_turn(self, slot: int) -> None:
-        async with self._condition:
-            await self._condition.wait_for(lambda: self._next == slot)
-
-    async def finish(self, slot: int) -> None:
-        async with self._condition:
-            if self._next != slot:
-                return
-            self._next += 1
-            self._condition.notify_all()
-
-
-# ═════════════════════════════════════════════════════════════════════════════
-# ═════════════════════════════════════════════════════════════════════════════
-#  ScanManager — one channel scanner with media/subtitle scope selection
-# ═════════════════════════════════════════════════════════════════════════════
 class ScanManager:
-    """Resumable channel scanner for media, subtitles, or both.
-
-    Each scope keeps its own cursor. A subtitle-only pass can therefore start
-    from the first channel message even after a media scan has already reached
-    the newest post.
-    """
-
-    VALID_SCOPES = {"media", "subtitles", "all"}
-
     def __init__(self) -> None:
         self._db = None
         self._task: Optional[asyncio.Task] = None
         self._cancel = False
         self._lock = asyncio.Lock()
+        self._db_lock = asyncio.Lock()
         self.state: Dict[str, Any] = self._blank_state()
+
+    #----- ── State helpers ────────────────────────────────────────────────────────
+    @staticmethod
+    def _blank_state() -> Dict[str, Any]:
+        return {
+            "status": "idle",            
+            "mode": "scan",              
+            "selected_channels": [],     
+            "pending": [],               
+            "current_channel": None,
+            "current_channel_name": "",
+            "current_id": 0,             
+            "current_target_id": 0,      
+            "cursors": {},               
+            "counters": {
+                "total_found": 0,
+                "processed": 0,
+                "indexed": 0,
+                "skipped_dup": 0,
+                "skipped_meta": 0,
+                "skipped_nonvid": 0,
+                "subtitles_added": 0,
+                "subtitles_skipped": 0,
+                "errors": 0,
+            },
+            "started_at": 0.0,
+            "updated_at": 0.0,
+            "finished_at": 0.0,
+            "error": None,
+        }
 
     @staticmethod
     def _blank_counters() -> Dict[str, int]:
@@ -113,995 +93,501 @@ class ScanManager:
             "skipped_dup": 0,
             "skipped_meta": 0,
             "skipped_nonvid": 0,
-            "subtitles_found": 0,
-            "subtitles_indexed": 0,
-            "subtitles_matched": 0,
-            "subtitles_unmatched": 0,
-            "subtitles_relinked": 0,
-            "subtitles_replaced": 0,
+            "subtitles_added": 0,
+            "subtitles_skipped": 0,
             "errors": 0,
         }
-
-    @classmethod
-    def _blank_state(cls) -> Dict[str, Any]:
-        return {
-            "status": "idle",            # idle|running|paused|completed|cancelled|error
-            # scanning|finalizing|idle.  The UI keeps the bar below 100% while
-            # final subtitle linking and counter reconciliation are still running.
-            "phase": "idle",
-            "mode": "scan",              # scan|rescan
-            "content_scope": "all",      # media|subtitles|all
-            "selected_channels": [],
-            "pending": [],
-            "current_channel": None,
-            "current_channel_name": "",
-            "current_id": 0,
-            "start_message_id": 0,
-            "latest_message_id": 0,
-            # True only when a real user session returned the Telegram history
-            # tail. Bot accounts cannot call messages.GetHistory, so their
-            # internal probe ceiling must never be shown as a channel end ID.
-            "tail_is_exact": False,
-            # Internal scan ceiling. With a bot-only client this is a probe
-            # window, not the actual Telegram channel tail.
-            "target_message_id": 0,
-            "summary": "",
-            # Separate cursors ensure one mode never skips another mode's files.
-            "cursors": {"media": {}, "subtitles": {}, "all": {}},
-            "counters": cls._blank_counters(),
-            # Stream IDs of subtitle rows touched during this scan.  These let
-            # the completed scan card report their final match state instead of
-            # retaining a temporary "unmatched" result from before media was indexed.
-            "subtitle_scanned_stream_ids": [],
-            "started_at": 0.0,
-            "updated_at": 0.0,
-            "finished_at": 0.0,
-            "error": None,
-        }
-
-    @classmethod
-    def _normalise_scope(cls, value: str | None) -> str:
-        value = str(value or "all").strip().lower()
-        aliases = {"video": "media", "videos": "media", "subtitle": "subtitles", "both": "all"}
-        value = aliases.get(value, value)
-        return value if value in cls.VALID_SCOPES else "all"
-
-    def _cursor_map(self) -> Dict[str, int]:
-        cursors = self.state.setdefault("cursors", {})
-        scope = self._normalise_scope(self.state.get("content_scope"))
-        scope_map = cursors.setdefault(scope, {})
-        return scope_map
 
     def bind_db(self, db) -> None:
         self._db = db
 
     async def load(self, db) -> None:
-        """Restore state and migrate old one-cursor scanner state safely."""
         self._db = db
         try:
             doc = await db.dbs["tracking"][_STATE_COLLECTION].find_one({"_id": _SCAN_DOC_ID})
-        except Exception as exc:
-            LOGGER.error(f"[ScanManager] load failed: {exc}")
+        except Exception as e:
+            LOGGER.error(f"[ScanManager] load failed: {e}")
             doc = None
 
-        if not doc:
-            self.state = self._blank_state()
-            return
-
-        doc.pop("_id", None)
-        restored = self._blank_state()
-        restored.update(doc)
-
-        raw_cursors = doc.get("cursors") or {}
-        # v3.3.1 stored {channel: cursor}. It scanned all file types, so retain
-        # that cursor for all/media while allowing a fresh subtitle-only pass.
-        if raw_cursors and all(not isinstance(value, dict) for value in raw_cursors.values()):
-            flat = {str(channel): int(cursor) for channel, cursor in raw_cursors.items()}
-            restored["cursors"] = {"media": dict(flat), "subtitles": {}, "all": dict(flat)}
+        if doc:
+            doc.pop("_id", None)
+            merged = self._blank_state()
+            merged.update(doc)
+            merged["cursors"] = {str(k): int(v) for k, v in (merged.get("cursors") or {}).items()}
+            if merged["status"] == "running":
+                merged["status"] = "paused"
+            self.state = merged
+            if self.state["status"] == "paused":
+                LOGGER.info("[ScanManager] Found an interrupted scan — marked as paused (resumable).")
+            await self._persist()
         else:
-            cursor_groups = {"media": {}, "subtitles": {}, "all": {}}
-            for scope in cursor_groups:
-                cursor_groups[scope] = {
-                    str(channel): int(cursor)
-                    for channel, cursor in (raw_cursors.get(scope) or {}).items()
-                }
-            restored["cursors"] = cursor_groups
-
-        counters = self._blank_counters()
-        counters.update(doc.get("counters") or {})
-        restored["counters"] = counters
-        restored["content_scope"] = self._normalise_scope(doc.get("content_scope"))
-        restored["subtitle_scanned_stream_ids"] = list(dict.fromkeys(
-            str(stream_id).strip()
-            for stream_id in (doc.get("subtitle_scanned_stream_ids") or [])
-            if str(stream_id).strip()
-        ))
-        if restored["status"] == "running":
-            restored["status"] = "paused"
-        self.state = restored
-        if self.state["status"] == "paused":
-            LOGGER.info("[ScanManager] Interrupted scan restored as paused (resumable).")
-        await self._persist()
+            self.state = self._blank_state()
 
     async def _persist(self) -> None:
         if self._db is None:
             return
         self.state["updated_at"] = _now()
         try:
-            document = dict(self.state)
-            document["_id"] = _SCAN_DOC_ID
+            doc = dict(self.state)
+            doc["_id"] = _SCAN_DOC_ID
             await self._db.dbs["tracking"][_STATE_COLLECTION].update_one(
-                {"_id": _SCAN_DOC_ID}, {"$set": document}, upsert=True
+                {"_id": _SCAN_DOC_ID}, {"$set": doc}, upsert=True
             )
-        except Exception as exc:
-            LOGGER.error(f"[ScanManager] persist failed: {exc}")
+        except Exception as e:
+            LOGGER.error(f"[ScanManager] persist failed: {e}")
 
     def get_status(self) -> Dict[str, Any]:
-        state = self.state
+        s = self.state
         elapsed = 0.0
-        if state["started_at"]:
-            elapsed = max(0.0, (state["finished_at"] or _now()) - state["started_at"])
+        if s["started_at"]:
+            end = s["finished_at"] or _now()
+            elapsed = max(0.0, end - s["started_at"])
+
+        target = int(s.get("current_target_id", 0) or 0)
+        cur = int(s.get("current_id", 0) or 0)
+        progress = max(0, min(100, round(cur / target * 100))) if target > 0 else 0
+
         return {
-            "status": state["status"],
-            "phase": str(state.get("phase") or "idle"),
-            "mode": state["mode"],
-            "content_scope": self._normalise_scope(state.get("content_scope")),
-            "is_running": state["status"] == "running",
-            "resumable": state["status"] in ("paused", "cancelled") and bool(state["pending"]),
-            "selected_channels": list(state["selected_channels"]),
-            "pending": list(state["pending"]),
-            "current_channel": state["current_channel"],
-            "current_channel_name": state["current_channel_name"],
-            "current_id": state["current_id"],
-            "start_message_id": int(state.get("start_message_id") or 0),
-            "latest_message_id": int(state.get("latest_message_id") or 0),
-            "tail_is_exact": bool(state.get("tail_is_exact")),
-            "target_message_id": int(state.get("target_message_id") or 0),
-            "summary": str(state.get("summary") or ""),
-            "counters": dict(state["counters"]),
+            "status": s["status"],
+            "mode": s["mode"],
+            "is_running": s["status"] == "running",
+            "resumable": s["status"] in ("paused", "cancelled") and bool(s["pending"]),
+            "selected_channels": list(s["selected_channels"]),
+            "pending": list(s["pending"]),
+            "current_channel": s["current_channel"],
+            "current_channel_name": s["current_channel_name"],
+            "current_id": cur,
+            "current_target_id": target,
+            "progress": progress,
+            "has_progress": target > 0,
+            "counters": dict(s["counters"]),
             "elapsed": _fmt_elapsed(elapsed),
             "elapsed_seconds": int(elapsed),
-            "error": state["error"],
+            "error": s["error"],
         }
 
-    def _track_scanned_subtitle(self, record: Dict[str, Any]) -> None:
-        """Remember a scan-run subtitle so final counters can use its real status."""
-        stream_id = str(record.get("stream_id") or "").strip()
-        if not stream_id:
-            return
-        tracked = self.state.setdefault("subtitle_scanned_stream_ids", [])
-        if stream_id not in tracked:
-            tracked.append(stream_id)
-
-    async def _reconcile_subtitle_counters(self) -> None:
-        """Replace temporary subtitle match counters with final persisted statuses.
-
-        A subtitle can be indexed before its video appears later in the same
-        channel.  It is briefly unmatched, then linked after that video is
-        indexed.  The scan card must show the final state, not that transient
-        first pass.
-        """
-        stream_ids = self.state.get("subtitle_scanned_stream_ids") or []
-        if not stream_ids or self._db is None:
-            return
-        try:
-            status_counts = await self._db.get_subtitle_status_counts(stream_ids)
-        except Exception as exc:
-            LOGGER.warning("[ScanManager] Could not reconcile subtitle counters: %s", exc)
-            return
-
-        matched = int(status_counts.get("matched") or 0)
-        unmatched = int(status_counts.get("unmatched") or 0)
-        counters = self.state["counters"]
-        counters["subtitles_matched"] = matched
-        counters["subtitles_unmatched"] = unmatched
-        LOGGER.info(
-            "[ScanManager] Subtitle counters reconciled: %s matched, %s unmatched.",
-            matched,
-            unmatched,
-        )
-
     async def _stream_id_exists(self, channel: int, msg_id: int) -> bool:
-        """Check normal IDs and members already stored in virtual split IDs."""
+        db = self._db
         try:
             stream_hash = await encode_string({"chat_id": channel, "msg_id": msg_id})
         except Exception:
-            return False
-        for index in range(1, self._db.current_db_index + 1):
-            storage = self._db.dbs.get(f"storage_{index}")
+            stream_hash = None
+        part_match = {"$elemMatch": {"chat_id": channel, "msg_id": msg_id}}
+        for i in range(1, db.current_db_index + 1):
+            storage = db.dbs.get(f"storage_{i}")
             if storage is None:
                 continue
-            if await storage["movie"].find_one({"telegram.id": stream_hash}):
+            if stream_hash:
+                if await storage["movie"].find_one({"telegram.id": stream_hash}):
+                    return True
+                if await storage["tv"].find_one({"seasons.episodes.telegram.id": stream_hash}):
+                    return True
+            if await storage["movie"].find_one({"telegram.parts": part_match}):
                 return True
-            if await storage["tv"].find_one({"seasons.episodes.telegram.id": stream_hash}):
-                return True
-            # Virtual split records keep part IDs inside `telegram.parts`.
-            split_query = {"telegram.parts": {"$elemMatch": {"chat_id": channel, "msg_id": msg_id}}}
-            if await storage["movie"].find_one(split_query):
-                return True
-            tv_split_query = {"seasons.episodes.telegram.parts": {"$elemMatch": {"chat_id": channel, "msg_id": msg_id}}}
-            if await storage["tv"].find_one(tv_split_query):
+            if await storage["tv"].find_one({"seasons.episodes.telegram.parts": part_match}):
                 return True
         return False
 
-    async def start(
-        self,
-        client,
-        channels: List[str],
-        mode: str = "scan",
-        content_scope: str = "all",
-        history_client=None,
-    ) -> Dict[str, Any]:
-        """Start or resume a media-only, subtitle-only, or combined scan.
-
-        Rescan starts from the first channel message but never deletes indexed
-        media first. Existing rows are preserved, and missing historical posts
-        are added safely. This prevents bot-only history limits from emptying a
-        library or its catalog shelves.
-        """
+    async def start(self, client, channels: List[str], mode: str = "scan") -> Dict[str, Any]:
         async with self._lock:
             if self.state["status"] == "running":
-                return {"ok": False, "message": "A channel scan is already running."}
+                return {"ok": False, "message": "A scan is already running."}
 
-            mode = str(mode or "scan").strip().lower()
-            if mode not in {"scan", "rescan"}:
-                return {"ok": False, "message": "Scan mode must be scan or rescan."}
-            content_scope = self._normalise_scope(content_scope)
-            channels = [str(channel).strip() for channel in (channels or []) if str(channel).strip()]
+            channels = [str(c).strip() for c in (channels or []) if str(c).strip()]
 
-            can_resume = (
-                mode == "scan"
-                and self.state["status"] in ("paused", "cancelled")
-                and bool(self.state["pending"])
-                and self._normalise_scope(self.state.get("content_scope")) == content_scope
-            )
-            if mode == "scan" and not channels and can_resume:
+            if mode == "scan" and not channels and self.state["pending"]:
                 channels = list(self.state["pending"])
+
             if not channels:
                 return {"ok": False, "message": "No channels selected."}
 
-            cursor_map = self.state.setdefault("cursors", {}).setdefault(content_scope, {})
             if mode == "rescan":
-                # A previous implementation purged all selected media/subtitle
-                # rows before it had successfully read old Telegram posts. A bot
-                # session has no GetHistory access and only probes a limited ID
-                # window, so that destructive order could wipe an entire library.
-                #
-                # Rescan is now a safe rebuild: reset only the cursor, retain all
-                # indexed rows, enrich source captions for existing qualities and
-                # add any messages that are truly missing.
-                for channel in channels:
-                    cursor_map.pop(str(channel), None)
-
+                for ch in channels:
+                    try:
+                        ch_int = int(str(ch).replace("-100", ""))
+                    except ValueError:
+                        continue
+                    try:
+                        await self._purge_channel_entries(ch_int)
+                    except Exception as e:
+                        LOGGER.error(f"[ScanManager] purge failed for {ch}: {e}")
+                    self.state["cursors"].pop(str(ch), None)
                 self.state["selected_channels"] = list(channels)
                 self.state["pending"] = list(channels)
                 self.state["counters"] = self._blank_counters()
-                self.state["subtitle_scanned_stream_ids"] = []
-                LOGGER.info(
-                    "[ScanManager] Safe rescan started for %s channel(s); existing library rows are preserved.",
-                    len(channels),
-                )
-            elif can_resume:
-                pending = list(self.state["pending"])
-                for channel in channels:
-                    if channel not in pending:
-                        pending.append(channel)
-                self.state["pending"] = pending
-                self.state["selected_channels"] = list(dict.fromkeys(self.state["selected_channels"] + channels))
             else:
-                self.state["selected_channels"] = list(channels)
-                self.state["pending"] = list(channels)
-                self.state["counters"] = self._blank_counters()
-                self.state["subtitle_scanned_stream_ids"] = []
+                resuming = self.state["status"] in ("paused", "cancelled") and self.state["pending"]
+                if resuming:
+                    merged_pending = list(self.state["pending"])
+                    for ch in channels:
+                        if ch not in merged_pending:
+                            merged_pending.append(ch)
+                    self.state["pending"] = merged_pending
+                    self.state["selected_channels"] = list(
+                        dict.fromkeys(self.state["selected_channels"] + channels)
+                    )
+                else:
+                    self.state["selected_channels"] = list(channels)
+                    self.state["pending"] = list(channels)
+                    self.state["counters"] = self._blank_counters()
 
             self.state["mode"] = mode
-            self.state["content_scope"] = content_scope
             self.state["status"] = "running"
-            self.state["phase"] = "scanning"
             self.state["error"] = None
-            self.state["summary"] = ""
-            self.state["current_channel"] = None
-            self.state["current_channel_name"] = ""
-            self.state["current_id"] = 0
-            self.state["start_message_id"] = 0
-            self.state["latest_message_id"] = 0
-            self.state["tail_is_exact"] = False
-            self.state["target_message_id"] = 0
             self.state["finished_at"] = 0.0
             self.state["started_at"] = _now()
             self._cancel = False
             await self._persist()
-            self._task = asyncio.create_task(self._run(client, history_client=history_client))
 
-            label = {"media": "Media", "subtitles": "Subtitle", "all": "Full"}[content_scope]
-            prefix = "Rescan" if mode == "rescan" else "Scan"
-            return {"ok": True, "message": f"{label} {prefix.lower()} started.", "status": self.get_status()}
+            self._task = asyncio.create_task(self._run(client))
+            return {"ok": True, "message": f"{'Rescan' if mode == 'rescan' else 'Scan'} started.",
+                    "status": self.get_status()}
 
     async def cancel(self) -> Dict[str, Any]:
         if self.state["status"] != "running":
-            return {"ok": False, "message": "No channel scan is currently running."}
+            return {"ok": False, "message": "No scan is currently running."}
         self._cancel = True
         return {"ok": True, "message": "Stop requested — the scan will pause after the current batch."}
 
-    async def _run(self, client, history_client=None) -> None:
+    async def _run(self, client) -> None:
         try:
             while self.state["pending"] and not self._cancel:
-                channel = self.state["pending"][0]
+                ch = self.state["pending"][0]
                 try:
-                    channel_id = int(channel)
+                    ch_id = int(ch)
                 except ValueError:
-                    LOGGER.warning(f"[ScanManager] Invalid channel id skipped: {channel}")
+                    LOGGER.warning(f"[ScanManager] invalid channel id: {ch}")
                     self.state["pending"].pop(0)
                     await self._persist()
                     continue
 
-                finished = await self._scan_channel(
-                    client, channel_id, channel, history_client=history_client
-                )
+                completed = await self._scan_channel(client, ch_id, ch)
                 if self._cancel:
                     break
-                if finished and self.state["pending"] and self.state["pending"][0] == channel:
-                    self.state["pending"].pop(0)
+                if completed:
+                    if self.state["pending"] and self.state["pending"][0] == ch:
+                        self.state["pending"].pop(0)
                     await self._persist()
 
             if self._cancel:
                 self.state["status"] = "cancelled"
-                self.state["phase"] = "idle"
-                self.state["summary"] = "Scan stopped. Resume continues from the saved message cursor."
                 LOGGER.info("[ScanManager] Scan cancelled by user (resumable).")
             else:
-                # All channel messages are committed.  Keep the progress bar at
-                # 99% while the final subtitle linking and counter reconciliation
-                # complete, instead of showing a misleading 100% too early.
-                self.state["phase"] = "finalizing"
-                self.state["summary"] = "Finalizing subtitles and scan counters…"
-                await self._persist()
-                # Relink once at completion instead of after every media row.
-                # This also links older subtitles when a media-only scan adds its
-                # matching video later in the channel.
-                result = await relink_unmatched_subtitles(self._db, limit=5000)
-                self.state["counters"]["subtitles_relinked"] = int(result.get("linked") or 0)
-                LOGGER.info(
-                    "[ScanManager] Subtitle relink complete: %s linked from %s checked.",
-                    result.get("linked", 0),
-                    result.get("checked", 0),
-                )
-                await self._reconcile_subtitle_counters()
                 self.state["status"] = "completed"
-                self.state["phase"] = "idle"
                 self.state["current_channel"] = None
                 self.state["current_channel_name"] = ""
-                processed = int(self.state["counters"].get("processed") or 0)
-                if processed == 0:
-                    self.state["summary"] = (
-                        "No new messages found. Use Rescan to rebuild older channel posts."
-                        if self.state.get("mode") == "scan"
-                        else "No indexable messages were found in the selected channels."
-                    )
-                else:
-                    self.state["summary"] = f"Scan complete — {processed} message(s) checked."
-                LOGGER.info("[ScanManager] Scan completed. %s", self.state["summary"])
+                LOGGER.info("[ScanManager] Scan completed.")
             self.state["finished_at"] = _now()
             await self._persist()
 
-        except (ChannelPrivate, ChatAdminRequired) as exc:
+        except (ChannelPrivate, ChatAdminRequired) as e:
             self.state["status"] = "error"
-            self.state["phase"] = "idle"
-            self.state["summary"] = "Scan could not access the selected channel."
-            self.state["error"] = f"Access denied to channel — make sure the bot is an admin. ({exc})"
+            self.state["error"] = f"Access denied to channel — make sure the bot is an admin. ({e})"
             self.state["finished_at"] = _now()
             LOGGER.error(f"[ScanManager] {self.state['error']}")
             await self._persist()
         except asyncio.CancelledError:
             await self._persist()
             raise
-        except Exception as exc:
+        except Exception as e:
             self.state["status"] = "error"
-            self.state["phase"] = "idle"
-            self.state["summary"] = "Scan failed before it could finish."
-            self.state["error"] = str(exc)
+            self.state["error"] = str(e)
             self.state["finished_at"] = _now()
-            LOGGER.error(f"[ScanManager] Unexpected error: {exc}")
+            LOGGER.error(f"[ScanManager] Unexpected error: {e}")
             await self._persist()
 
-    async def _latest_channel_message_id(self, client, chat_id: int) -> tuple[int, bool]:
-        """Return ``(tail_id, is_exact)`` without advancing a scan cursor.
+    async def _scan_channel(self, client, chat_id: int, ch_key: str) -> bool:
+        s = self.state
 
-        A Telegram bot cannot call ``messages.GetHistory``. When that happens,
-        return ``is_exact=False`` so callers can continue their safe explicit-ID
-        scan, but the WebUI never mistakes the internal probe ceiling for the
-        channel's final message ID.
-        """
-        try:
-            history = client.get_chat_history(chat_id, limit=1)
-            async for message in history:
-                return int(getattr(message, "id", 0) or 0), True
-            # The request itself worked and the channel is empty.
-            return 0, True
-        except (ChannelPrivate, ChatAdminRequired):
-            raise
-        except Exception as exc:
-            LOGGER.warning(
-                "[ScanManager] Could not read actual channel end ID for %s: %s",
-                chat_id,
-                exc,
-            )
-        return 0, False
-
-    async def _scan_channel(
-        self,
-        client,
-        chat_id: int,
-        channel_key: str,
-        history_client=None,
-    ) -> bool:
-        state = self.state
-        cursor_map = self._cursor_map()
         try:
             chat = await client.get_chat(chat_id)
-            state["current_channel_name"] = getattr(chat, "title", str(chat_id))
+            s["current_channel_name"] = getattr(chat, "title", str(chat_id))
         except (ChannelPrivate, ChatAdminRequired):
             raise
-        except Exception as exc:
-            state["current_channel_name"] = str(chat_id)
-            LOGGER.warning(f"[ScanManager] Could not resolve channel name for {chat_id}: {exc}")
+        except Exception as e:
+            s["current_channel_name"] = str(chat_id)
+            LOGGER.warning(f"[ScanManager] Could not resolve channel name for {chat_id}: {e}")
 
-        state["current_channel"] = channel_key
-        scope = self._normalise_scope(state.get("content_scope"))
+        s["current_channel"] = ch_key
 
-        # A real user session can read channel history and gives us an exact
-        # tail. Bots cannot call messages.GetHistory, so the bot still fetches
-        # explicit IDs while the user session is used only for the tail lookup.
-        tail_client = history_client or client
-        latest_id, tail_is_exact = await self._latest_channel_message_id(tail_client, chat_id)
-        state["latest_message_id"] = latest_id
-        state["tail_is_exact"] = tail_is_exact
+        last_id = await self._probe_last_message_id(client, chat_id)
+        use_probe = last_id is not None and last_id >= 1
+        s["current_target_id"] = last_id if use_probe else 0
 
-        saved_cursor = int(cursor_map.get(str(channel_key), 1) or 1)
-        current = max(1, saved_cursor)
-        state["start_message_id"] = current
-
-        # A stale cursor from the old empty-batch algorithm can be far beyond
-        # the actual channel tail. Clamp it to the next real message position,
-        # so the next upload is picked up by the normal Start Scan button.
-        if tail_is_exact and current > latest_id + 1:
-            LOGGER.info(
-                "[ScanManager] Cursor for %s was ahead of channel tail (%s > %s); resetting to %s.",
-                channel_key,
-                current,
-                latest_id,
-                latest_id + 1,
-            )
-            current = latest_id + 1
-            cursor_map[str(channel_key)] = current
-            state["start_message_id"] = current
-
-        # The scanner still needs a bounded explicit-ID range when running
-        # bot-only. That range is intentionally internal: it is not the actual
-        # channel end and must not be rendered as one in the WebUI.
-        target_id = min(
-            latest_id if tail_is_exact else current + (SCAN_BATCH_SIZE * SCAN_MAX_EMPTY_BATCHES),
-            SCAN_MAX_ID_CAP,
-        )
-        state["target_message_id"] = target_id
-        state["current_id"] = current
-
+        current = int(s["cursors"].get(str(ch_key), 1) or 1)
         LOGGER.info(
-            "[ScanManager] Scanning %s (%s) from id %s to %s [%s]",
-            state["current_channel_name"],
-            chat_id,
-            current,
-            latest_id if tail_is_exact else "actual end unavailable (bot-only probe)",
-            scope,
-        )
-        LOGGER.info(
-            "[ScanManager] Fast metadata mode: %s parallel worker(s); ordered database commits.",
-            SCAN_METADATA_CONCURRENCY,
+            f"[ScanManager] Scanning {s['current_channel_name']} ({chat_id}) from id {current}"
+            + (f" up to {last_id} (probe)" if use_probe else " (heuristic mode — probe unavailable)")
         )
 
-        # When the cursor is already at the exact channel tail, this is a valid
-        # incremental scan with no new messages. Do not jump it forward again.
-        if tail_is_exact and current > latest_id:
-            state["current_id"] = latest_id
-            cursor_map[str(channel_key)] = current
-            await self._persist()
-            LOGGER.info(
-                "[ScanManager] No new messages in %s (cursor=%s, tail=%s).",
-                state["current_channel_name"],
-                current,
-                latest_id,
-            )
-            return True
-
-        # `upper_bound` is exclusive. This scans the exact tail when available,
-        # otherwise a bounded bot-only probe window.
-        upper_bound = min(target_id + 1, SCAN_MAX_ID_CAP + 1)
         empty_streak = 0
         batch_count = 0
-        last_seen_message_id = current - 1
-        previous_legacy_candidates: List[tuple[int, str, Any]] = []
 
-        while current < upper_bound:
-            if self._cancel:
-                return False
+        while not self._cancel and current < SCAN_MAX_ID_CAP:
+            #----- ── Stop condition ───────────────────────────────────────────────
+            if use_probe:
+                if current > last_id:
+                    break
+            elif empty_streak >= SCAN_MAX_EMPTY_BATCHES:
+                break
 
-            batch_end = min(current + SCAN_BATCH_SIZE, upper_bound)
-            batch_ids = list(range(current, batch_end))
+            upper = min(current + SCAN_BATCH_SIZE, SCAN_MAX_ID_CAP)
+            if use_probe:
+                upper = min(upper, last_id + 1)
+            batch_ids = list(range(current, upper))
+            if not batch_ids:
+                break
+
             try:
                 messages = await client.get_messages(chat_id, batch_ids)
-            except FloodWait as exc:
-                LOGGER.info(f"[ScanManager] FloodWait {exc.value}s — sleeping…")
-                await asyncio.sleep(exc.value)
-                continue
-            except Exception as exc:
-                LOGGER.error(f"[ScanManager] Batch fetch error at {current}: {exc}")
-                state["counters"]["errors"] += 1
-                current = batch_end
+            except FloodWait as e:
+                LOGGER.info(f"[ScanManager] FloodWait {e.value}s — sleeping…")
+                await asyncio.sleep(e.value)
+                try:
+                    messages = await client.get_messages(chat_id, batch_ids)
+                except Exception as ex:
+                    LOGGER.error(f"[ScanManager] Retry failed at {current}: {ex}")
+                    s["counters"]["errors"] += 1
+                    current = upper
+                    empty_streak += 1
+                    s["cursors"][str(ch_key)] = current
+                    s["current_id"] = current
+                    continue
+            except Exception as e:
+                LOGGER.error(f"[ScanManager] Batch fetch error at {current}: {e}")
+                s["counters"]["errors"] += 1
+                current = upper
                 empty_streak += 1
-                # With no known tail, never advance the saved cursor over
-                # unseen IDs after an error.  That would permanently skip a
-                # future upload that uses one of those IDs.
-                cursor_map[str(channel_key)] = (
-                    current if tail_is_exact else max(saved_cursor, last_seen_message_id + 1)
-                )
-                state["current_id"] = min(batch_end - 1, target_id)
-                await self._persist()
-                if not tail_is_exact and empty_streak >= SCAN_MAX_EMPTY_BATCHES:
-                    break
+                s["cursors"][str(ch_key)] = current
+                s["current_id"] = current
                 continue
 
             if not isinstance(messages, list):
                 messages = [messages]
 
-            batch_had_content = False
-            batch_messages: List[Any] = []
-            for message in messages:
-                if self._cancel:
-                    cursor_map[str(channel_key)] = (
-                        current if tail_is_exact else max(saved_cursor, last_seen_message_id + 1)
-                    )
-                    await self._persist()
-                    return False
-                if message is None or message.empty:
-                    continue
+            to_process = [m for m in messages if m is not None and not m.empty]
+            batch_had_content = bool(to_process)
 
-                # Record the fetched message for cursor safety, but do not move
-                # the visible progress position yet.  Fast workers may still be
-                # resolving metadata, so the UI advances only after their ordered
-                # database commit has completed.
-                message_id = int(getattr(message, "id", 0) or current)
-                last_seen_message_id = max(last_seen_message_id, message_id)
-                batch_had_content = True
-                state["counters"]["total_found"] += 1
-                batch_messages.append(message)
+            if to_process:
+                s["counters"]["total_found"] += len(to_process)
+                sem = asyncio.Semaphore(SCAN_PROCESS_CONCURRENCY)
 
-            # Metadata lookup is the slow path. Resolve a few files in parallel,
-            # then commit their database updates in their original Telegram order.
-            if batch_messages:
-                # Legacy `.001.mkv` volumes are accepted only after adjacent
-                # sibling parts pass the contextual consecutive-sequence check.
-                split_overrides, previous_legacy_candidates = await self._legacy_bare_split_overrides(
-                    client,
-                    chat_id,
-                    batch_messages,
-                    previous_legacy_candidates,
-                    batch_end,
-                    upper_bound,
-                )
-                # The ordered commit gate advances Processed/current message only
-                # after each message has really finished indexing.
-                await self._process_messages_fast(
-                    batch_messages,
-                    chat_id,
-                    split_overrides=split_overrides,
-                )
-            else:
-                previous_legacy_candidates = []
+                async def _worker(msg):
+                    async with sem:
+                        if self._cancel:
+                            return
+                        await self._process_message(client, msg, chat_id)
+                        s["counters"]["processed"] += 1
+
+                await asyncio.gather(*(_worker(m) for m in to_process))
+
+            if self._cancel:
+                s["cursors"][str(ch_key)] = current
+                s["current_id"] = current
+                await self._persist()
+                return False
 
             empty_streak = 0 if batch_had_content else empty_streak + 1
-            current = batch_end
-            cursor_map[str(channel_key)] = (
-                current if tail_is_exact else max(saved_cursor, last_seen_message_id + 1)
-            )
-            # Empty batches also advance the visible live position, but only
-            # the saved cursor uses the safe last-seen rule above.
-            state["current_id"] = min(batch_end - 1, target_id)
+            current = upper
+            s["cursors"][str(ch_key)] = current
+            s["current_id"] = current
+
             batch_count += 1
             if batch_count % SCAN_PERSIST_EVERY == 0:
                 await self._persist()
-            if not tail_is_exact and empty_streak >= SCAN_MAX_EMPTY_BATCHES:
-                break
-            if current < upper_bound:
-                await asyncio.sleep(SCAN_BATCH_DELAY)
+
+            await asyncio.sleep(SCAN_BATCH_DELAY)
 
         await self._persist()
-        LOGGER.info(f"[ScanManager] Finished {state['current_channel_name']} at id {min(current - 1, target_id)}")
+        LOGGER.info(f"[ScanManager] Finished {s['current_channel_name']} at id {current}")
         return True
 
-    @staticmethod
-    def _legacy_bare_split_candidate_for_message(message: Any):
-        """Return one contextual `.001.mkv` candidate from a media message.
-
-        This is intentionally separate from normal split detection.  A caller
-        must validate the candidate against sibling parts before it is used.
-        """
-        file = getattr(message, "video", None) or getattr(message, "document", None)
-        if file is None:
-            return None
-        message_id = int(getattr(message, "id", 0) or 0)
-        if message_id <= 0:
-            return None
-        raw_file_name = getattr(file, "file_name", "") or ""
-        caption = getattr(message, "caption", "") or ""
-        source, info = find_legacy_bare_split_source(
-            caption,
-            raw_file_name,
-            clean_filename(caption),
-            clean_filename(raw_file_name),
-        )
-        return (message_id, source, info) if source and info else None
-
-    async def _legacy_bare_split_overrides(
-        self,
-        client,
-        chat_id: int,
-        current_messages: List[Any],
-        previous_candidates: List[tuple[int, str, Any]],
-        next_start: int,
-        upper_bound: int,
-    ) -> tuple[Dict[int, tuple[str, Any]], List[tuple[int, str, Any]]]:
-        """Resolve safe legacy `.001.mkv` groups for one scan batch.
-
-        The current batch is checked with the immediately preceding and next
-        batch.  This catches normal sequential Telegram uploads even when a
-        `.001`/`.002` boundary lands between two 200-message fetches, without
-        ever promoting a filename based on its suffix alone.
-        """
-        current_candidates = [
-            candidate
-            for message in current_messages
-            if (candidate := self._legacy_bare_split_candidate_for_message(message))
-        ]
-        if not current_candidates and not previous_candidates:
-            return {}, []
-
-        lookahead_candidates: List[tuple[int, str, Any]] = []
-        if next_start < upper_bound:
-            lookahead_end = min(next_start + SCAN_BATCH_SIZE, upper_bound)
+    async def _probe_last_message_id(self, client, chat_id: int):
+        probe = None
+        try:
+            probe = await client.send_message(chat_id, SCAN_PROBE_TEXT)
+        except FloodWait as e:
+            LOGGER.info(f"[ScanManager] FloodWait {e.value}s during probe — sleeping…")
+            await asyncio.sleep(e.value)
             try:
-                messages = await client.get_messages(chat_id, list(range(next_start, lookahead_end)))
-                if not isinstance(messages, list):
-                    messages = [messages]
-                for message in messages:
-                    if message is None or getattr(message, "empty", False):
-                        continue
-                    candidate = self._legacy_bare_split_candidate_for_message(message)
-                    if candidate:
-                        lookahead_candidates.append(candidate)
-            except FloodWait as exc:
-                # The real scan fetch handles FloodWait and retries its own
-                # batch.  This optional context lookup must never stall it.
-                LOGGER.info("[LegacySplit] Look-ahead postponed by FloodWait %ss.", exc.value)
-            except Exception as exc:
-                LOGGER.debug("[LegacySplit] Look-ahead unavailable at %s: %s", next_start, exc)
+                probe = await client.send_message(chat_id, SCAN_PROBE_TEXT)
+            except Exception as ex:
+                LOGGER.warning(f"[ScanManager] Probe send failed for {chat_id}: {ex}")
+                return None
+        except Exception as e:
+            LOGGER.warning(f"[ScanManager] Could not send probe to {chat_id}: {e}")
+            return None
 
-        contextual = [
-            (message_id, info)
-            for message_id, _source, info in (previous_candidates + current_candidates + lookahead_candidates)
-        ]
-        accepted = resolve_legacy_bare_split_candidates(contextual)
-        overrides = {
-            message_id: (source, accepted[message_id])
-            for message_id, source, _info in current_candidates
-            if message_id in accepted
-        }
-        if overrides:
-            LOGGER.info(
-                "[LegacySplit] Accepted %s bare-number volume(s) after consecutive sibling validation.",
-                len(overrides),
+        last_id = getattr(probe, "id", None)
+        try:
+            await client.delete_messages(chat_id, probe.id)
+        except Exception as e:
+            LOGGER.warning(
+                f"[ScanManager] Could not delete probe message "
+                f"{getattr(probe, 'id', None)} in {chat_id}: {e}"
             )
-        # Keep only the directly previous batch. The look-ahead is queried again
-        # as its own real batch on the next loop, preserving scan ordering.
-        return overrides, current_candidates
+        return last_id
 
-    async def _process_messages_fast(
-        self,
-        messages: List[Any],
-        chat_id: int,
-        *,
-        split_overrides: Optional[Dict[int, tuple[str, Any]]] = None,
-    ) -> None:
-        """Resolve a Telegram batch concurrently while preserving commit order."""
-        if not messages:
+    async def _process_message(self, client, message, chat_id: int) -> None:
+        s = self.state
+        db = self._db
+
+        if is_skip_channel(message):
+            s["counters"]["skipped_meta"] += 1
             return
 
-        gate = _OrderedBatchCommit()
-        limiter = asyncio.Semaphore(SCAN_METADATA_CONCURRENCY)
+        #----- Subtitle files: match to a title and store, don't treat as media
+        sub_name = message.document.file_name if message.document else ""
+        if sub_name and is_subtitle_file(sub_name):
+            channel_int = int(str(chat_id).replace("-100", ""))
+            if await ingest_subtitle(sub_name, channel_int, message.id):
+                s["counters"]["subtitles_added"] += 1
+            else:
+                s["counters"]["subtitles_skipped"] += 1
+            return
 
-        async def worker(slot: int, message: Any) -> None:
-            async with limiter:
-                message_id = int(getattr(message, "id", 0) or 0)
-                await self._process_message(
-                    message,
-                    chat_id,
-                    split_override=(split_overrides or {}).get(message_id),
-                    commit_gate=gate,
-                    commit_slot=slot,
-                )
+        is_video = bool(message.video)
+        is_supported = is_video
+        if message.document and not is_video:
+            mime = getattr(message.document, "mime_type", "") or ""
+            if mime.startswith("video/"):
+                is_supported = True
+            else:
+                file_name = message.document.file_name or ""
+                if detect_split_upload(file_name, mime):
+                    is_supported = True
+                elif find_split_source(file_name, message.caption or "")[1]:
+                    is_supported = True
 
-        results = await asyncio.gather(
-            *(worker(slot, message) for slot, message in enumerate(messages)),
-            return_exceptions=True,
-        )
-        for result in results:
-            if isinstance(result, BaseException):
-                LOGGER.error("[ScanManager] Fast worker failed: %s", result)
-                self.state["counters"]["errors"] += 1
+        if not is_supported:
+            s["counters"]["skipped_nonvid"] += 1
+            return
 
-    async def _process_message(
-        self,
-        message,
-        chat_id: int,
-        *,
-        split_override: tuple[str, Any] | None = None,
-        commit_gate: _OrderedBatchCommit | None = None,
-        commit_slot: int | None = None,
-    ) -> None:
-        entered_commit = False
-
-        async def _enter_commit() -> None:
-            nonlocal entered_commit
-            if commit_gate is not None and not entered_commit:
-                await commit_gate.wait_turn(int(commit_slot or 0))
-                entered_commit = True
+        file = message.video or message.document
+        title = message.caption or file.file_name
+        msg_id = message.id
+        raw_size = file.file_size
+        size = get_readable_file_size(file.file_size)
+        channel_int = int(str(chat_id).replace("-100", ""))
 
         try:
-            state = self.state
-            scope = self._normalise_scope(state.get("content_scope"))
-
-            if message.document and (
-                is_subtitle_file(extract_supported_filename(message.caption or ""), message.document.mime_type or "")
-                or is_subtitle_file(message.document.file_name or "", message.document.mime_type or "")
-            ):
-                if scope == "media":
-                    return
-                state["counters"]["subtitles_found"] += 1
-                try:
-                    channel_int = int(str(chat_id).replace("-100", ""))
-                    await _enter_commit()
-                    record = await index_subtitle(
-                        self._db,
-                        channel=channel_int,
-                        msg_id=message.id,
-                        filename=message.document.file_name or message.caption or "subtitle.srt",
-                        caption=message.caption or "",
-                        raw_size=message.document.file_size or 0,
-                        size=get_readable_file_size(message.document.file_size or 0),
-                        mime_type=message.document.mime_type or "",
-                    )
-                    self._track_scanned_subtitle(record)
-                    state["counters"]["subtitles_indexed"] += 1
-                    state["counters"]["subtitles_replaced"] += int(record.get("replaced_count") or 0)
-                    if record.get("status") == "matched":
-                        state["counters"]["subtitles_matched"] += 1
-                        media = record.get("media") or {}
-                        LOGGER.info(
-                            "[ScanManager] Subtitle indexed: %s [%s] → %s [%s]",
-                            record.get("filename") or "subtitle",
-                            record.get("language_code") or "und",
-                            media.get("title") or "media",
-                            media.get("imdb_id") or "no-imdb",
-                        )
-                    else:
-                        state["counters"]["subtitles_unmatched"] += 1
-                        detected = record.get("detected") or {}
-                        LOGGER.info(
-                            "[ScanManager] Subtitle indexed: %s [%s] → unmatched (title: %s)",
-                            record.get("filename") or "subtitle",
-                            record.get("language_code") or "und",
-                            detected.get("title") or "unknown",
-                        )
-                except Exception as exc:
-                    LOGGER.error(f"[ScanManager] Subtitle index error msg {message.id}: {exc}")
-                    state["counters"]["errors"] += 1
+            if await self._stream_id_exists(channel_int, msg_id):
+                s["counters"]["skipped_dup"] += 1
                 return
+        except Exception as e:
+            LOGGER.warning(f"[ScanManager] Dup-check error msg {msg_id}: {e}")
 
-            is_video = bool(message.video)
-            file = message.video or message.document
-            raw_file_name = getattr(file, "file_name", "") or ""
-            caption = message.caption or ""
-            caption_filename = extract_supported_filename(caption)
-            # Keep the real Telegram filename for the downloadable stream; the
-            # caption is used only for metadata lookup and is always tried first.
-            title = raw_file_name or caption or "video.mkv"
-            file_name = raw_file_name or title
-            if split_override:
-                split_source, split_info = split_override
-            else:
-                split_source, split_info = find_split_source(
-                    caption_filename,
-                    raw_file_name,
-                    clean_filename(caption_filename),
-                    clean_filename(raw_file_name),
-                )
+        try:
+            raw_filename = getattr(file, "file_name", "") or title
+            split_override = None
+            if message.document:
+                split_override = detect_split_upload(raw_filename, message.document.mime_type or "")
+            if split_override is None:
+                split_override = find_split_source(raw_filename, message.caption or "")[1]
+            metadata_info = await metadata_from_caption_or_filename(
+                caption=message.caption or "",
+                filename=raw_filename,
+                channel=channel_int,
+                msg_id=msg_id,
+                override_id=extract_default_id(message.caption or ""),
+                split_info_override=split_override,
+            )
+        except Exception as e:
+            LOGGER.warning(f"[ScanManager] Metadata exception for msg {msg_id}: {e}")
+            metadata_info = None
 
-            # Full rescans used to rely only on filename matching.  Reuse the
-            # live-upload MIME-aware fallback so generic `.zip.001` files remain
-            # supported after restarting the bot or pressing Scan All.
-            document_mime = getattr(message.document, "mime_type", "") or ""
-            if not split_info:
-                mime_split = detect_split_upload(raw_file_name, document_mime)
-                if mime_split:
-                    split_source, split_info = raw_file_name, mime_split
-
-            is_video_document = False
-            if message.document and not is_video:
-                mime_type = document_mime
-                # Split ZIP chunks are usually application/zip or octet-stream,
-                # not video/*. A valid video extension in the caption is checked
-                # before the filename for the same reason as live uploads.
-                is_video_document = (
-                    mime_type.startswith("video/")
-                    or bool(split_info)
-                    or is_video_filename(caption_filename)
-                    or is_video_filename(raw_file_name)
-                )
-
-            if not (is_video or is_video_document):
-                if scope != "subtitles":
-                    state["counters"]["skipped_nonvid"] += 1
-                return
-            if scope == "subtitles":
-                return
-
-            metadata_source = split_source or file_name
-            msg_id = message.id
-            raw_size = getattr(file, "file_size", 0) or 0
-            size = get_readable_file_size(raw_size)
-            channel_int = int(str(chat_id).replace("-100", ""))
-
+        if metadata_info is None:
+            s["counters"]["skipped_meta"] += 1
             try:
-                if await self._stream_id_exists(channel_int, msg_id):
-                    # Safe rescans do not reinsert an existing Telegram source,
-                    # but they do learn its caption/filename for tag rules.
-                    affected = await self._db.annotate_media_source(
-                        channel_int, msg_id, caption=caption, filename=raw_file_name or file_name
-                    )
-                    if affected:
-                        try:
-                            from Backend.helper.tag_catalog import sync_tag_catalog_for_identity
-                            for affected_type, affected_tmdb_id in affected:
-                                await sync_tag_catalog_for_identity(
-                                    self._db, affected_type, affected_tmdb_id
-                                )
-                        except Exception as tag_exc:
-                            LOGGER.debug("[ScanManager] Tag rule refresh skipped for msg %s: %s", msg_id, tag_exc)
-                    state["counters"]["skipped_dup"] += 1
-                    return
-            except Exception as exc:
-                LOGGER.warning(f"[ScanManager] Duplicate check error msg {msg_id}: {exc}")
+                await route_to_skip_channel(client, message)
+            except Exception as e:
+                LOGGER.warning(f"[ScanManager] Skip-channel route failed for msg {msg_id}: {e}")
+            return
 
-            try:
-                # The caption is always resolved first. The physical filename is
-                # retained for stream grouping, quality fallback, and the retry
-                # only when caption metadata cannot be found.
-                metadata_info = await metadata_from_caption_or_filename(
-                    caption=caption,
-                    filename=metadata_source,
-                    channel=channel_int,
-                    msg_id=msg_id,
-                    split_info_override=split_info,
-                )
-            except Exception as exc:
-                LOGGER.warning(f"[ScanManager] Metadata exception for msg {msg_id}: {exc}")
-                metadata_info = None
-            if metadata_info is None:
-                state["counters"]["skipped_meta"] += 1
-                return
+        title_clean = metadata_info.get("media_filename") or finalize_media_name(title, bool(metadata_info.get('group_key')))
 
-            # Persist raw Telegram source text for caption/tag catalog rules.
-            # This is also used by safe rescans to enrich historical rows.
-            metadata_info["source_caption"] = caption
-            metadata_info["source_filename"] = raw_file_name or file_name
-
-            title_clean = remove_urls(metadata_source if metadata_info.get("group_key") else title)
-
-            # Historical scans can see the part suffix only after rebuilding the
-            # display filename. Recover it here, before a 937 MB final part gets
-            # written as an ordinary single-file stream.
-            if not metadata_info.get("group_key"):
-                extension_suffix = "" if title_clean.lower().endswith((".mkv", ".mp4", ".avi", ".ts", ".m4v", ".mov", ".wmv", ".webm", ".flv", ".mpeg", ".mpg")) else ".mkv"
-                _, recovered_split = find_split_source(
-                    caption_filename,
-                    title_clean,
-                    f"{title_clean}{extension_suffix}",
-                    file_name,
-                    raw_file_name,
-                )
-                if recovered_split:
-                    metadata_info.update(split_metadata_fields(
-                        channel_int,
-                        metadata_info.get("quality"),
-                        recovered_split,
-                    ))
-                    LOGGER.info(
-                        "[SplitRecovery] msg %s: %s → part %s (media: %s)",
-                        msg_id,
-                        title_clean,
-                        recovered_split.part_number,
-                        recovered_split.media_filename,
-                    )
-
-            if metadata_info.get("group_key"):
-                title_clean = metadata_info.get("media_filename") or strip_part_suffix(title_clean)
-            if not title_clean.lower().endswith((".mkv", ".mp4", ".avi", ".ts", ".m4v", ".mov", ".wmv", ".webm", ".flv", ".mpeg", ".mpg")):
-                title_clean += ".mkv"
-            try:
-                await _enter_commit()
-                updated_id = await self._db.insert_media(
+        insert_status: dict = {}
+        try:
+            async with self._db_lock:
+                updated_id = await db.insert_media(
                     metadata_info,
                     channel=channel_int,
                     msg_id=msg_id,
                     size=size,
-                    raw_size=raw_size,
                     name=title_clean,
+                    raw_size=raw_size,
+                    status=insert_status,
                 )
-                if updated_id:
-                    state["counters"]["indexed"] += 1
-                    try:
-                        from Backend.helper.tag_catalog import sync_tag_catalog_for_identity
-                        await sync_tag_catalog_for_identity(
-                            self._db, metadata_info.get("media_type", "movie"), metadata_info.get("tmdb_id")
-                        )
-                    except Exception as tag_exc:
-                        LOGGER.debug("[ScanManager] Tag rule refresh skipped for msg %s: %s", msg_id, tag_exc)
-                    if metadata_info.get("group_key"):
-                        LOGGER.info(
-                            "[ScanManager] Split part indexed: %s (part %s)",
-                            title_clean,
-                            metadata_info.get("part_number") or 1,
-                        )
-                    elif metadata_info.get("media_type") == "tv":
-                        LOGGER.info(
-                            "[ScanManager] TV episode indexed: %s S%02dE%02d (msg %s)",
-                            metadata_info.get("title") or "TV",
-                            int(metadata_info.get("season_number") or 0),
-                            int(metadata_info.get("episode_number") or 0),
-                            msg_id,
-                        )
-                    else:
-                        LOGGER.info(
-                            "[ScanManager] Movie indexed: %s (msg %s)",
-                            metadata_info.get("title") or "Movie",
-                            msg_id,
-                        )
+            if updated_id:
+                if insert_status.get("duplicate_skipped"):
+                    s["counters"]["skipped_dup"] += 1
                 else:
-                    state["counters"]["skipped_meta"] += 1
-            except Exception as exc:
-                LOGGER.error(f"[ScanManager] Database insert error msg {msg_id}: {exc}")
-                state["counters"]["errors"] += 1
+                    s["counters"]["indexed"] += 1
+            else:
+                s["counters"]["skipped_meta"] += 1
+        except Exception as e:
+            LOGGER.error(f"[ScanManager] DB insert error msg {msg_id}: {e}")
+            s["counters"]["errors"] += 1
 
-        finally:
-            # Invalid files and metadata failures still advance the ordered gate;
-            # otherwise later workers would wait forever behind an early return.
-            if commit_gate is not None:
-                if not entered_commit:
-                    await _enter_commit()
-                # Commit slots are ordered, so this is the exact point at which
-                # the visible progress position can safely advance.  Do not let
-                # the bar reach the batch tail merely because metadata work was
-                # queued ahead of these completed commits.
-                message_id = int(getattr(message, "id", 0) or 0)
-                if message_id:
-                    self.state["current_id"] = message_id
-                counters = self.state.setdefault("counters", {})
-                counters["processed"] = int(counters.get("processed") or 0) + 1
-                self.state["updated_at"] = _now()
-                await commit_gate.finish(int(commit_slot or 0))
+    #----- ── Purge (rescan helper) ────────────────────────────────────────────────
+    async def _purge_channel_entries(self, channel_int: int) -> int:
+        db = self._db
+        purged = 0
+        try:
+            await db.dbs["tracking"]["subtitles"].delete_many({"chat_id": channel_int})
+        except Exception as e:
+            LOGGER.warning(f"[ScanManager] subtitle purge failed for {channel_int}: {e}")
+        for i in range(1, db.current_db_index + 1):
+            storage = db.dbs.get(f"storage_{i}")
+            if storage is None:
+                continue
 
-# ═════════════════════════════════════════════════════════════════════════════
-#  DbCheckManager — integrity checker + dead-link purge
-# ═════════════════════════════════════════════════════════════════════════════
+            async for movie in storage["movie"].find({}):
+                remaining = []
+                changed = False
+                for q in movie.get("telegram", []):
+                    try:
+                        decoded = await decode_string(q["id"])
+                        if int(decoded["chat_id"]) == channel_int:
+                            purged += 1
+                            changed = True
+                            continue
+                    except Exception:
+                        pass
+                    remaining.append(q)
+                if changed:
+                    if remaining:
+                        movie["telegram"] = remaining
+                        await storage["movie"].replace_one({"_id": movie["_id"]}, movie)
+                    else:
+                        await storage["movie"].delete_one({"_id": movie["_id"]})
+
+            async for tv in storage["tv"].find({}):
+                tv_changed = False
+                for season in tv.get("seasons", []):
+                    for episode in season.get("episodes", []):
+                        remaining = []
+                        for q in episode.get("telegram", []):
+                            try:
+                                decoded = await decode_string(q["id"])
+                                if int(decoded["chat_id"]) == channel_int:
+                                    purged += 1
+                                    tv_changed = True
+                                    continue
+                            except Exception:
+                                pass
+                            remaining.append(q)
+                        episode["telegram"] = remaining
+                    season["episodes"] = [ep for ep in season["episodes"] if ep.get("telegram")]
+                tv["seasons"] = [se for se in tv["seasons"] if se.get("episodes")]
+                if tv_changed:
+                    if tv["seasons"]:
+                        await storage["tv"].replace_one({"_id": tv["_id"]}, tv)
+                    else:
+                        await storage["tv"].delete_one({"_id": tv["_id"]})
+        return purged
+
+
 class DbCheckManager:
     def __init__(self) -> None:
         self._db = None
@@ -1113,14 +599,14 @@ class DbCheckManager:
     @staticmethod
     def _blank_state() -> Dict[str, Any]:
         return {
-            "status": "idle",   # idle|running|completed|cancelled|error
+            "status": "idle",   
             "checked": 0,
             "alive": 0,
             "dead": 0,
             "errors": 0,
             "purged": 0,
             "speed": 0,
-            "dead_entries": [],   # [{"id": hash, "title": str}]
+            "dead_entries": [],   
             "started_at": 0.0,
             "finished_at": 0.0,
             "error": None,
@@ -1151,7 +637,7 @@ class DbCheckManager:
             "error": s["error"],
         }
 
-    # ── Control ───────────────────────────────────────────────────────────────
+    #----- ── Control ───────────────────────────────────────────────────────────────
     async def start(self, client) -> Dict[str, Any]:
         async with self._lock:
             if self.state["status"] == "running":
@@ -1160,8 +646,6 @@ class DbCheckManager:
             self.state["status"] = "running"
             self.state["started_at"] = _now()
             self._cancel = False
-            # DbCheckManager only verifies explicit stored message IDs.
-            # It does not use GetHistory, so there is no history_client here.
             self._task = asyncio.create_task(self._run(client))
             return {"ok": True, "message": "DB check started.", "status": self.get_status()}
 
@@ -1171,11 +655,10 @@ class DbCheckManager:
         self._cancel = True
         return {"ok": True, "message": "Stop requested — finishing the current batch."}
 
-    # ── Single-message check ───────────────────────────────────────────────────
+    #----- ── Single-message check ───────────────────────────────────────────────────
     async def _check_message(self, client, stream_hash: str):
         try:
             decoded = await decode_string(stream_hash)
-            # split files store a parts list — every part must be alive
             if isinstance(decoded, dict) and "parts" in decoded:
                 parts = decoded.get("parts") or []
                 if not parts:
@@ -1198,17 +681,15 @@ class DbCheckManager:
         if chat_id is None or msg_id is None:
             return False
         try:
-            raw_chat_id = str(chat_id)
-            normalized_chat_id = int(raw_chat_id) if raw_chat_id.startswith("-100") else int(f"-100{raw_chat_id}")
-            message_id = int(msg_id)
-            result = await client.get_messages(normalized_chat_id, message_ids=[message_id])
-            msg = result[0] if isinstance(result, (list, tuple)) and result else result
-            if msg is None or getattr(msg, "empty", False):
+            chat_id = int(f"-100{chat_id}")
+            msg_id = int(msg_id)
+            msg = await client.get_messages(chat_id, msg_id)
+            if msg is None or msg.empty:
                 return False
-            return bool(getattr(msg, "video", None) or getattr(msg, "document", None) or getattr(msg, "audio", None))
+            return True
         except FloodWait as e:
             await asyncio.sleep(e.value)
-            return await self._check_one(client, chat_id, msg_id)
+            return await self._check_one(client, str(chat_id).replace("-100", ""), msg_id)
         except Exception:
             return None
 
@@ -1235,8 +716,8 @@ class DbCheckManager:
         elapsed = max(1, int(_now() - s["started_at"]))
         s["speed"] = s["checked"] // elapsed
 
-    # ── Worker ──────────────────────────────────────────────────────────────────
-    async def _run(self, client, history_client=None) -> None:
+    #----- ── Worker ──────────────────────────────────────────────────────────────────
+    async def _run(self, client) -> None:
         db = self._db
         s = self.state
         try:
@@ -1245,7 +726,7 @@ class DbCheckManager:
                 if storage is None:
                     continue
 
-                # Movies
+                #----- Movies
                 last_id = None
                 while not self._cancel:
                     query = {"_id": {"$gt": last_id}} if last_id else {}
@@ -1264,7 +745,7 @@ class DbCheckManager:
                             await self._record_results(batch, results)
                             await asyncio.sleep(DBCHECK_BATCH_DELAY)
 
-                # TV
+                #----- TV
                 last_id = None
                 while not self._cancel:
                     query = {"_id": {"$gt": last_id}} if last_id else {}
@@ -1301,10 +782,9 @@ class DbCheckManager:
             s["finished_at"] = _now()
             LOGGER.error(f"[DbCheck] Error: {e}")
 
-    # ── Purge ────────────────────────────────────────────────────────────────────
+    #----- ── Purge ────────────────────────────────────────────────────────────────────
     async def purge(self, stream_ids: Optional[List[str]] = None) -> Dict[str, Any]:
-        """Delete the given dead stream entries (defaults to the ones found in the
-        last check). Returns how many were purged."""
+        #----- Delete the given dead stream entries (defaults to the last check's); returns count purged
         db = self._db
         if stream_ids is None:
             stream_ids = [d["id"] for d in self.state.get("dead_entries", [])]
@@ -1321,7 +801,7 @@ class DbCheckManager:
             )
             purged += sum(1 for r in results if r is True)
 
-        # Drop purged ids from the in-memory dead list
+        #----- Drop purged ids from the in-memory dead list
         purged_set = set(stream_ids)
         self.state["dead_entries"] = [
             d for d in self.state.get("dead_entries", []) if d["id"] not in purged_set
@@ -1331,6 +811,293 @@ class DbCheckManager:
                 "purged": purged}
 
 
-# ── Singletons ──────────────────────────────────────────────────────────────
+class DuplicateManager:
+    def __init__(self) -> None:
+        self._db = None
+        self._task: Optional[asyncio.Task] = None
+        self._purge_task: Optional[asyncio.Task] = None
+        self._cancel = False
+        self._lock = asyncio.Lock()
+        self.state: Dict[str, Any] = self._blank_state()
+
+    @staticmethod
+    def _blank_state() -> Dict[str, Any]:
+        return {
+            "status": "idle",
+            "scanned": 0,
+            "groups": [],
+            "duplicate_count": 0,
+            "purged": 0,
+            "started_at": 0.0,
+            "finished_at": 0.0,
+            "error": None,
+            "purge_status": "idle",
+            "purge_total": 0,
+            "purge_done": 0,
+            "purge_removed": 0,
+            "purge_failed": 0,
+            "purge_started_at": 0.0,
+            "purge_finished_at": 0.0,
+        }
+
+    def bind_db(self, db) -> None:
+        self._db = db
+
+    def get_status(self) -> Dict[str, Any]:
+        s = self.state
+        elapsed = 0.0
+        if s["started_at"]:
+            end = s["finished_at"] or _now()
+            elapsed = max(0.0, end - s["started_at"])
+
+        #----- Cleanup (purge) progress + ETA
+        p_total = int(s.get("purge_total", 0) or 0)
+        p_done = int(s.get("purge_done", 0) or 0)
+        p_status = s.get("purge_status", "idle")
+        p_elapsed = 0.0
+        if s.get("purge_started_at"):
+            p_end = s.get("purge_finished_at") or _now()
+            p_elapsed = max(0.0, p_end - s["purge_started_at"])
+        p_progress = round(p_done / p_total * 100) if p_total else 0
+        p_eta = 0
+        if p_status == "running" and p_done and p_elapsed > 0:
+            rate = p_done / p_elapsed
+            if rate > 0:
+                p_eta = int(max(0, (p_total - p_done)) / rate)
+
+        return {
+            "status": s["status"],
+            "is_running": s["status"] == "running",
+            "scanned": s["scanned"],
+            "group_count": len(s["groups"]),
+            "duplicate_count": s["duplicate_count"],
+            "purged": s["purged"],
+            "groups": list(s["groups"]),
+            "elapsed": _fmt_elapsed(elapsed),
+            "elapsed_seconds": int(elapsed),
+            "error": s["error"],
+            "purge_status": p_status,
+            "purge_running": p_status == "running",
+            "purge_total": p_total,
+            "purge_done": p_done,
+            "purge_removed": int(s.get("purge_removed", 0) or 0),
+            "purge_failed": int(s.get("purge_failed", 0) or 0),
+            "purge_progress": p_progress,
+            "purge_elapsed": _fmt_elapsed(p_elapsed),
+            "purge_eta": _fmt_elapsed(p_eta) if p_eta else "—",
+        }
+
+    async def start(self) -> Dict[str, Any]:
+        async with self._lock:
+            if self.state["status"] == "running":
+                return {"ok": False, "message": "A duplicate scan is already running."}
+            if self.state.get("purge_status") == "running":
+                return {"ok": False, "message": "A cleanup is currently running."}
+            self.state = self._blank_state()
+            self.state["status"] = "running"
+            self.state["started_at"] = _now()
+            self._cancel = False
+            self._task = asyncio.create_task(self._run())
+            return {"ok": True, "message": "Duplicate scan started.", "status": self.get_status()}
+
+    async def cancel(self) -> Dict[str, Any]:
+        if self.state["status"] != "running":
+            return {"ok": False, "message": "No duplicate scan is currently running."}
+        self._cancel = True
+        return {"ok": True, "message": "Stop requested."}
+
+    #----- Group a telegram list by (quality, name, size); record groups with 2+
+    #----- distinct stream ids. Array order is preserved, so the last copy is the
+    #----- most recently indexed copy and is protected by default.
+    def _collect(self, qualities: List[dict], label: str, media_type: str, gid: int) -> int:
+        buckets: Dict[tuple, List[dict]] = {}
+        seen_ids: set[str] = set()
+        for position, q in enumerate(qualities or []):
+            stream_id = str(q.get("id") or "").strip()
+            if not stream_id or stream_id in seen_ids:
+                continue
+            seen_ids.add(stream_id)
+            item = dict(q)
+            item["_position"] = position
+            buckets.setdefault(self._db._dup_key(item), []).append(item)
+
+        for items in buckets.values():
+            if len(items) < 2:
+                continue
+            items.sort(key=lambda item: int(item.get("_position", 0)))
+            keep_id = items[-1]["id"]
+            gid += 1
+            self.state["groups"].append({
+                "group_id": gid,
+                "title": label,
+                "quality": items[0].get("quality"),
+                "media_type": media_type,
+                "keep_id": keep_id,
+                "entries": [
+                    {
+                        "id": it["id"],
+                        "name": it.get("name"),
+                        "size": it.get("size"),
+                        "is_keep": it["id"] == keep_id,
+                    }
+                    for it in items
+                ],
+            })
+            self.state["duplicate_count"] += len(items) - 1
+        return gid
+
+    async def _run(self) -> None:
+        db = self._db
+        s = self.state
+        try:
+            gid = 0
+            storage_keys = sorted(
+                (key for key in db.dbs if str(key).startswith("storage_")),
+                key=lambda key: int(str(key).split("_", 1)[1]) if str(key).split("_", 1)[1].isdigit() else 0,
+            )
+            for storage_key in storage_keys:
+                storage = db.dbs.get(storage_key)
+                if storage is None:
+                    continue
+
+                async for movie in storage["movie"].find({}):
+                    if self._cancel:
+                        break
+                    s["scanned"] += 1
+                    year = movie.get("release_year")
+                    label = f"{movie.get('title') or 'Unknown'}{f' ({year})' if year else ''}"
+                    gid = self._collect(movie.get("telegram", []), label, "movie", gid)
+
+                if self._cancel:
+                    break
+
+                async for show in storage["tv"].find({}):
+                    if self._cancel:
+                        break
+                    s["scanned"] += 1
+                    title = show.get("title") or "Unknown"
+                    for season in show.get("seasons", []):
+                        for ep in season.get("episodes", []):
+                            label = f"{title} S{season.get('season_number', 0):02d}E{ep.get('episode_number', 0):02d}"
+                            gid = self._collect(ep.get("telegram", []), label, "tv", gid)
+
+                if self._cancel:
+                    break
+
+            s["status"] = "cancelled" if self._cancel else "completed"
+            s["finished_at"] = _now()
+            LOGGER.info(f"[Duplicates] {s['status']} — {len(s['groups'])} group(s), {s['duplicate_count']} redundant")
+        except asyncio.CancelledError:
+            s["status"] = "cancelled"
+            s["finished_at"] = _now()
+            raise
+        except Exception as e:
+            s["status"] = "error"
+            s["error"] = str(e)
+            s["finished_at"] = _now()
+            LOGGER.error(f"[Duplicates] Error: {e}")
+
+    #----- Delete duplicates: explicit ids, or (delete_all) keep the newest per group.
+    #----- Runs in the background so the UI can poll deletion progress.
+    async def purge(self, stream_ids: Optional[List[str]] = None, delete_all: bool = False) -> Dict[str, Any]:
+        async with self._lock:
+            if self.state.get("purge_status") == "running":
+                return {"ok": False, "message": "A cleanup is already running."}
+
+            groups = self.state.get("groups", [])
+            removable_ids: set[str] = set()
+            keep_ids: set[str] = set()
+            for group in groups:
+                entries = group.get("entries", []) or []
+                keep_id = str(group.get("keep_id") or "").strip()
+                if not keep_id and entries:
+                    keep_id = str(entries[-1].get("id") or "").strip()
+                if keep_id:
+                    keep_ids.add(keep_id)
+                removable_ids.update(
+                    str(entry.get("id") or "").strip()
+                    for entry in entries
+                    if str(entry.get("id") or "").strip() and str(entry.get("id") or "").strip() != keep_id
+                )
+
+            if delete_all:
+                requested = list(removable_ids)
+            else:
+                requested = [str(value or "").strip() for value in (stream_ids or [])]
+                # Only current, verified duplicate copies may be removed. The
+                # protected copy in each group can never be deleted by this tool.
+                requested = [value for value in requested if value in removable_ids and value not in keep_ids]
+
+            # Stable de-duplication keeps progress totals accurate.
+            ids = list(dict.fromkeys(value for value in requested if value))
+            if not ids:
+                return {
+                    "ok": False,
+                    "message": "No removable duplicates selected. One protected copy is always kept in every group.",
+                    "purged": 0,
+                }
+
+            self.state["purge_status"] = "running"
+            self.state["purge_total"] = len(ids)
+            self.state["purge_done"] = 0
+            self.state["purge_removed"] = 0
+            self.state["purge_failed"] = 0
+            self.state["purge_started_at"] = _now()
+            self.state["purge_finished_at"] = 0.0
+            self.state["error"] = None
+            self._purge_task = asyncio.create_task(self._run_purge(ids))
+            return {"ok": True, "message": f"Removing {len(ids)} duplicate(s)…",
+                    "total": len(ids), "status": self.get_status()}
+
+    async def _run_purge(self, ids: List[str]) -> None:
+        db = self._db
+        s = self.state
+        purged = 0
+        successful_ids: set[str] = set()
+        failed = 0
+        try:
+            for h in ids:
+                try:
+                    if await db.delete_media_by_stream_id(h, delete_file=True):
+                        purged += 1
+                        successful_ids.add(h)
+                    else:
+                        failed += 1
+                        LOGGER.warning(f"[Duplicates] stream was not found during cleanup: {h}")
+                except Exception as e:
+                    failed += 1
+                    LOGGER.error(f"[Duplicates] purge failed for {h}: {e}")
+                finally:
+                    s["purge_done"] += 1
+                    s["purge_removed"] = purged
+                    s["purge_failed"] = failed
+
+            new_groups = []
+            for g in s.get("groups", []):
+                remaining = [e for e in g.get("entries", []) if e["id"] not in successful_ids]
+                if len(remaining) >= 2:
+                    g["entries"] = remaining
+                    keep_id = str(g.get("keep_id") or "")
+                    if keep_id not in {str(e.get("id") or "") for e in remaining}:
+                        keep_id = str(remaining[-1].get("id") or "")
+                        g["keep_id"] = keep_id
+                    for entry in remaining:
+                        entry["is_keep"] = str(entry.get("id") or "") == keep_id
+                    new_groups.append(g)
+            s["groups"] = new_groups
+            s["duplicate_count"] = sum(len(g["entries"]) - 1 for g in new_groups)
+            s["purged"] = s.get("purged", 0) + purged
+            s["purge_status"] = "completed" if failed == 0 else "completed_with_errors"
+            LOGGER.info(f"[Duplicates] cleanup completed — removed {purged}, failed {failed}")
+        except Exception as e:
+            s["purge_status"] = "error"
+            s["error"] = str(e)
+            LOGGER.error(f"[Duplicates] cleanup error: {e}")
+        finally:
+            s["purge_finished_at"] = _now()
+
+
+#----- ── Singletons ──────────────────────────────────────────────────────────────
 scan_manager = ScanManager()
 dbcheck_manager = DbCheckManager()
+duplicate_manager = DuplicateManager()

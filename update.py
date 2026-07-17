@@ -1,7 +1,7 @@
 from logging import FileHandler, StreamHandler, INFO, Formatter, basicConfig, error as log_error, info as log_info
 from os import path as ospath, environ
 from pathlib import Path
-from subprocess import run as srun, TimeoutExpired
+from subprocess import run as srun
 from dotenv import load_dotenv
 from datetime import datetime
 import pytz
@@ -43,7 +43,7 @@ def _fetch_upstream_from_db() -> tuple[str | None, str]:
 
         tracking_uri = uris[0]
         client = MongoClient(tracking_uri, serverSelectionTimeoutMS=5000)
-        doc = client["dbStremio"]["settings"].find_one({"_id": "app_settings"})
+        doc = client["dbFyvio"]["settings"].find_one({"_id": "app_settings"})
         client.close()
 
         if doc:
@@ -78,16 +78,12 @@ if UPSTREAM_REPO:
         f"git reset --hard origin/{UPSTREAM_BRANCH} -q"
     )
 
-    try:
-        update = srun(update_cmd, shell=True, timeout=45)
-    except TimeoutExpired:
-        log_error("update.py: Git update timed out after 45 seconds; keeping packaged build.")
-        update = None
+    update = srun(update_cmd, shell=True)
     repo = UPSTREAM_REPO.strip("/").split("/")
     repo_url = f"https://github.com/{repo[-2]}/{repo[-1]}"
     log_info(f"UPSTREAM_REPO: {repo_url} | UPSTREAM_BRANCH: {UPSTREAM_BRANCH}")
 
-    if update is not None and update.returncode == 0:
+    if update.returncode == 0:
         log_info("Successfully updated with latest commits!!")
         commit_check = srun(["git", "rev-parse", "HEAD"], capture_output=True, text=True)
         if commit_check.returncode == 0:
