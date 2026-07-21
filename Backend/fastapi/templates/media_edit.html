@@ -2,7 +2,7 @@
 
 {% block title %}Edit {{ media_type|title }} · TG Stremio{% endblock %}
 {% block extra_head %}
-<link rel="stylesheet" href="/static/css/pages/media-edit.css?v=3.6.142">
+<link rel="stylesheet" href="/static/css/pages/media-edit.css?v=3.6.120">
 {% endblock %}
 
 {% block content %}
@@ -46,19 +46,8 @@
   </section>
   {% endif %}
 
-  {% if media_details %}
-  <nav class="media-edit-tabs" id="media-edit-tabs" role="tablist" aria-label="Media edit sections">
-    <button type="button" class="media-edit-tab active" data-edit-tab="details" onclick="switchMediaEditTab('details')" role="tab" aria-selected="true">📝 <span>Details</span></button>
-    <button type="button" class="media-edit-tab" data-edit-tab="content" onclick="switchMediaEditTab('content')" role="tab" aria-selected="false">🎬 <span>Content</span></button>
-    <button type="button" class="media-edit-tab" data-edit-tab="subtitles" onclick="switchMediaEditTab('subtitles')" role="tab" aria-selected="false">💬 <span>Subtitles</span></button>
-    <button type="button" class="media-edit-tab" data-edit-tab="catalog" onclick="switchMediaEditTab('catalog')" role="tab" aria-selected="false">📚 <span>Catalog</span></button>
-    <button type="button" class="media-edit-tab" data-edit-tab="rescan" onclick="switchMediaEditTab('rescan')" role="tab" aria-selected="false">🔄 <span>Rescan</span></button>
-    <button type="button" class="media-edit-tab" data-edit-tab="move" onclick="switchMediaEditTab('move')" role="tab" aria-selected="false">↔️ <span>Move</span></button>
-  </nav>
-  {% endif %}
-
   <div class="editor-stack">
-    <section class="editor-panel metadata-panel media-edit-panel active" data-edit-panel="details">
+    <section class="editor-panel metadata-panel">
       <div class="panel-heading">
         <div class="panel-title"><span class="panel-icon"><i class="fa-solid fa-pen-to-square"></i></span><div><h2>Record details</h2><p>These fields control the metadata shown in your Stremio library.</p></div></div>
       </div>
@@ -76,7 +65,7 @@
     </section>
 
     {% if media_details %}
-    <section class="editor-panel media-edit-panel" data-edit-panel="rescan">
+    <section class="editor-panel">
       <div class="panel-heading">
         <div class="panel-title"><span class="panel-icon"><i class="fa-solid fa-wand-magic-sparkles"></i></span><div><h2>Repair metadata match</h2><p>Use this only when automatic detection selected the wrong title. Telegram files are not touched.</p></div></div>
         <span class="panel-note">IMDb / TMDb</span>
@@ -91,7 +80,7 @@
       </div>
     </section>
 
-    <section class="editor-panel catalog-panel media-edit-panel" data-edit-panel="catalog">
+    <section class="editor-panel catalog-panel">
       <div class="panel-heading">
         <div class="panel-title"><span class="panel-icon"><i class="fa-solid fa-layer-group"></i></span><div><h2>Custom catalog placement</h2><p>Add or remove this title from an existing Stremio catalog.</p></div></div>
         <a href="/catalogs" class="panel-link">Manage catalogs <i class="fa-solid fa-arrow-right"></i></a>
@@ -100,53 +89,7 @@
       <p id="custom-catalog-status" class="inline-state">Only visible catalogs are shown in Stremio. Hidden catalogs remain editable here.</p>
     </section>
 
-    <section class="editor-panel subtitle-panel media-edit-panel" data-edit-panel="subtitles">
-      <div class="panel-heading">
-        <div class="panel-title"><span class="panel-icon"><i class="fa-solid fa-closed-captioning"></i></span><div><h2>Subtitles</h2><p>Review subtitle files currently matched to this {{ media_type }}.</p></div></div>
-        <div class="panel-heading-actions"><a href="/subtitles" class="panel-link">Manage all <i class="fa-solid fa-arrow-right"></i></a><button type="button" class="btn-ui btn-ghost" id="media-subtitle-relink" onclick="relinkMediaSubtitles()"><i class="fa-solid fa-link"></i> Relink pending</button></div>
-      </div>
-      <div class="subtitle-summary-line"><span id="media-subtitle-count"><i class="fa-solid fa-spinner fa-spin"></i> Loading subtitles…</span><small>Deleting here removes only the subtitle index row; the Telegram source file stays safe.</small></div>
-      <div id="media-subtitle-list" class="media-subtitle-list"><div class="content-empty"><i class="fa-solid fa-spinner fa-spin"></i><strong>Loading subtitles</strong><span>Checking matched subtitle records.</span></div></div>
-    </section>
-
-    <section class="editor-panel full-move-panel media-edit-panel" data-edit-panel="move">
-      <div class="panel-heading">
-        <div class="panel-title"><span class="panel-icon"><i class="fa-solid fa-right-left"></i></span><div><h2>Move full {{ 'series' if media_type in ['tv', 'series'] else 'movie' }}</h2><p>Move every indexed quality{% if media_type in ['tv', 'series'] %}, season, and episode{% endif %} to one Telegram channel.</p></div></div>
-        <span class="panel-note">Full title</span>
-      </div>
-
-      <div class="full-move-overview">
-        <div class="full-move-title-card">
-          <img src="{{ media_details.poster or '/static/placeholder.svg' }}" alt="{{ media_details.title }}" onerror="this.src='/static/placeholder.svg'">
-          <div><span>{{ 'Series' if media_type == 'tv' else 'Movie' }}</span><strong>{{ media_details.title }}</strong><small>{% if media_type in ['tv', 'series'] %}All seasons and episodes{% else %}All indexed qualities{% endif %}</small></div>
-        </div>
-        <div class="full-move-stats">
-          <span><b>{{ move_summary.streams }}</b><small>Streams</small></span>
-          {% if media_type in ['tv', 'series'] %}<span><b>{{ move_summary.episodes }}</b><small>Episodes</small></span>{% endif %}
-          <span><b>{{ move_summary.messages }}</b><small>Telegram files</small></span>
-        </div>
-      </div>
-
-      <div class="full-move-destination">
-        <div class="destination-copy"><span>Destination channel</span><strong id="full-move-channel-name">No channel selected</strong><small>Only channel names are displayed. Channel IDs stay hidden.</small></div>
-        <button type="button" class="btn-ui btn-primary" onclick="openAvailableChannels()"><i class="fa-solid fa-tower-broadcast"></i> Available channels</button>
-      </div>
-
-      <div class="move-safety-note full-move-safety"><i class="fa-solid fa-shield-halved"></i><div><strong>Safe full-title move</strong><p>Files are copied strictly one by one with a 3-second delay. All destination copies are created first, the complete movie or series index is updated once, then old Telegram posts are removed. If copying or saving fails, new copies are rolled back.</p></div></div>
-
-      <div id="full-move-progress" class="full-move-progress hidden">
-        <div class="full-move-progress-head"><strong id="full-move-progress-label">Preparing move…</strong><span id="full-move-progress-percent">0%</span></div>
-        <div class="full-move-progress-track"><span id="full-move-progress-bar"></span></div>
-        <div class="full-move-progress-meta"><span id="full-move-progress-files">0 streams</span><span id="full-move-progress-messages">0 files copied</span></div>
-      </div>
-      <p id="full-move-state" class="inline-state hidden"></p>
-
-      <div class="full-move-actions">
-        <button id="full-move-submit" type="button" class="btn-ui btn-primary" onclick="startFullTitleMove()" disabled><i class="fa-solid fa-right-left"></i> Move full {{ 'series' if media_type in ['tv', 'series'] else 'movie' }} and remove old</button>
-      </div>
-    </section>
-
-    <section class="editor-panel content-panel media-edit-panel" data-edit-panel="content">
+    <section class="editor-panel content-panel">
       <div class="panel-heading">
         <div class="panel-title"><span class="panel-icon"><i class="fa-solid fa-hard-drive"></i></span><div><h2>Indexed files</h2><p>Manage the files currently available for this {{ media_type }}.</p></div></div>
         {% if media_type == 'movie' and media_details.telegram %}<span class="panel-note">{{ media_details.telegram|length }} stream{{ 's' if media_details.telegram|length != 1 else '' }}</span>{% elif media_type == 'tv' and media_details.seasons %}<span class="panel-note">{{ media_details.seasons|length }} season{{ 's' if media_details.seasons|length != 1 else '' }}</span>{% endif %}
@@ -194,18 +137,6 @@
   </div>
 </div>
 
-<div id="available-channels-modal" class="speed-modal hidden" aria-modal="true" aria-labelledby="available-channels-title" role="dialog">
-  <button class="speed-modal-backdrop" type="button" onclick="closeAvailableChannels()" aria-label="Close available channels"></button>
-  <section class="speed-modal-card channel-picker-modal">
-    <header><div><span class="modal-kicker">Telegram storage</span><h2 id="available-channels-title"><i class="fa-solid fa-tower-broadcast"></i> Available channels</h2><p>Select the destination by channel name.</p></div><button type="button" class="modal-close" onclick="closeAvailableChannels()" aria-label="Close"><i class="fa-solid fa-xmark"></i></button></header>
-    <div class="speed-modal-body channel-picker-body">
-      <div id="available-channel-list" class="available-channel-list"><div class="content-empty"><i class="fa-solid fa-spinner fa-spin"></i><strong>Loading channels</strong><span>Checking configured AUTH channels.</span></div></div>
-      <p id="available-channel-state" class="inline-state hidden"></p>
-    </div>
-    <footer><button type="button" class="btn-ui btn-ghost" onclick="closeAvailableChannels()">Cancel</button><button id="available-channel-apply" type="button" class="btn-ui btn-primary" onclick="applyAvailableChannel()" disabled><i class="fa-solid fa-check"></i> Use selected channel</button></footer>
-  </section>
-</div>
-
 <div id="speed-test-modal" class="speed-modal hidden" aria-modal="true" aria-labelledby="speed-modal-title" role="dialog">
   <button class="speed-modal-backdrop" type="button" onclick="closeSpeedTest()" aria-label="Close speed test"></button>
   <section class="speed-modal-card">
@@ -222,5 +153,5 @@
 
 {% block extra_scripts %}
 <script>window.TG_STREMIO_PAGE = { tmdbId: {{ tmdb_id }}, dbIndex: {{ db_index }}, mediaType: {{ media_type | tojson }}, apiToken: {{ (api_token | tojson) if api_token else 'null' }} };</script>
-<script src="/static/js/pages/media-edit.js?v=3.6.145" defer></script>
+<script src="/static/js/pages/media-edit.js?v=3.6.121" defer></script>
 {% endblock %}

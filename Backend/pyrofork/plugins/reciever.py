@@ -23,7 +23,6 @@ from Backend.helper.split_files import (
 from Backend.helper.subtitle_service import index_subtitle, relink_unmatched_subtitles
 from Backend.helper.subtitle_constants import is_subtitle_file
 from Backend.helper.upload_status import process_upload_statuses, queue_upload_status
-from Backend.helper.media_move_guard import is_mover_message
 
 
 
@@ -485,9 +484,6 @@ create_task(process_upload_statuses())
 async def file_receive_handler(client: Client, message: Message):
     if str(message.chat.id) not in SettingsManager.current().auth_channels:
         return
-    if is_mover_message(int(message.chat.id), int(message.id)):
-        LOGGER.debug("[MediaMove] Skipped normal indexing for mover copy %s/%s", message.chat.id, message.id)
-        return
 
     try:
         if _is_subtitle_message(message):
@@ -532,9 +528,6 @@ async def file_receive_handler(client: Client, message: Message):
 @Client.on_edited_message(filters.channel & (filters.document | filters.video))
 async def file_edited_handler(client: Client, message: Message):
     if str(message.chat.id) not in SettingsManager.current().auth_channels:
-        return
-    if is_mover_message(int(message.chat.id), int(message.id)):
-        LOGGER.debug("[MediaMove] Skipped edited-message indexing for mover copy %s/%s", message.chat.id, message.id)
         return
     if _is_automatic_caption_edit(message):
         return

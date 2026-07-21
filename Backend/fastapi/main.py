@@ -17,7 +17,6 @@ from Backend.fastapi.routes.template_routes import (
 )
 from Backend.fastapi.routes.api_routes import (
     list_media_api, delete_media_api, update_media_api,
-    start_media_title_move_api, media_title_move_status_api, media_title_move_channels_api,
     delete_movie_quality_api, delete_tv_quality_api,
     delete_tv_episode_api, delete_tv_season_api,
     create_token_api, revoke_token_api, update_token_limits_api,
@@ -39,10 +38,7 @@ from Backend.fastapi.routes.api_routes import (
     get_settings_api, update_settings_api,
     get_db_stats_api, health_api, get_logs_api, download_logs_api, restart_app_api,
     get_tools_channels_api, start_scan_api, cancel_scan_api, scan_status_api,
-    start_dbcheck_api, cancel_dbcheck_api, dbcheck_status_api, purge_dead_links_api,
-    start_duplicate_check_api, cancel_duplicate_check_api, duplicate_check_status_api, purge_duplicates_api,
-    bot_admin_scan_api, bot_admin_apply_api, bot_admin_apply_status_api,
-    list_media_subtitles_api, delete_media_subtitle_api
+    start_dbcheck_api, cancel_dbcheck_api, dbcheck_status_api, purge_dead_links_api
 )
 
 from Backend.fastapi.routes.subtitle_api_routes import (
@@ -55,10 +51,7 @@ templates = Jinja2Templates(directory="Backend/fastapi/templates")
 app = FastAPI(
     title="Telegram Stremio Media Server",
     description="A powerful, self-hosted Telegram Stremio Media Server built with FastAPI, MongoDB, and PyroFork seamlessly integrated with Stremio for automated media streaming and discovery.",
-    version=__version__,
-    docs_url=None,
-    redoc_url=None,
-    openapi_url=None,
+    version=__version__
 )
 
 # --- Middleware Setup ---
@@ -222,35 +215,6 @@ async def delete_media(tmdb_id: int, db_index: int, media_type: str, _: bool = D
 async def update_media(request: Request, tmdb_id: int, db_index: int, media_type: str, _: bool = Depends(require_auth)):
     return await update_media_api(request, tmdb_id, db_index, media_type)
 
-@app.get("/api/media/move-title/channels")
-async def move_media_title_channels(
-    tmdb_id: int,
-    db_index: int,
-    media_type: str,
-    _: bool = Depends(require_auth),
-):
-    return await media_title_move_channels_api(tmdb_id, db_index, media_type)
-
-
-@app.post("/api/media/move-title/start")
-async def move_media_title_start(
-    request: Request,
-    tmdb_id: int,
-    db_index: int,
-    media_type: str,
-    _: bool = Depends(require_auth),
-):
-    return await start_media_title_move_api(request, tmdb_id, db_index, media_type)
-
-
-@app.get("/api/media/move-title/status")
-async def move_media_title_status(
-    job_id: str = Query(..., min_length=1),
-    _: bool = Depends(require_auth),
-):
-    return await media_title_move_status_api(job_id)
-
-
 @app.delete("/api/media/delete-quality")
 async def delete_movie_quality(tmdb_id: int, db_index: int, id: str, _: bool = Depends(require_auth)):
     return await delete_movie_quality_api(tmdb_id, db_index, id)
@@ -394,14 +358,6 @@ async def speed_test_stream(
 ):
     return await speed_test_stream_api(quality_id, tmdb_id, db_index, media_type)
 
-
-@app.get("/api/media/subtitles")
-async def media_subtitles(media_type: str, tmdb_id: int, db_index: int, _: bool = Depends(require_auth)):
-    return await list_media_subtitles_api(media_type, tmdb_id, db_index)
-
-@app.delete("/api/media/subtitles/{subtitle_id}")
-async def media_subtitle_delete(subtitle_id: str, subtitle_db_index: int, _: bool = Depends(require_auth)):
-    return await delete_media_subtitle_api(subtitle_id, subtitle_db_index)
 
 @app.get("/api/media/rescan/search")
 async def search_media_rescan(
@@ -593,34 +549,6 @@ async def tools_dbcheck_status(_: bool = Depends(require_auth)):
 @app.post("/api/admin/tools/dead-links/purge")
 async def tools_purge_dead_links(payload: dict | None = None, _: bool = Depends(require_auth)):
     return await purge_dead_links_api(payload)
-
-@app.post("/api/admin/tools/duplicates/start")
-async def tools_duplicates_start(_: bool = Depends(require_auth)):
-    return await start_duplicate_check_api()
-
-@app.post("/api/admin/tools/duplicates/cancel")
-async def tools_duplicates_cancel(_: bool = Depends(require_auth)):
-    return await cancel_duplicate_check_api()
-
-@app.get("/api/admin/tools/duplicates/status")
-async def tools_duplicates_status(_: bool = Depends(require_auth)):
-    return await duplicate_check_status_api()
-
-@app.post("/api/admin/tools/duplicates/purge")
-async def tools_duplicates_purge(payload: dict | None = None, _: bool = Depends(require_auth)):
-    return await purge_duplicates_api(payload)
-
-@app.get("/api/admin/tools/bot-admin/scan")
-async def tools_bot_admin_scan(_: bool = Depends(require_auth)):
-    return await bot_admin_scan_api()
-
-@app.post("/api/admin/tools/bot-admin/apply")
-async def tools_bot_admin_apply(payload: dict, _: bool = Depends(require_auth)):
-    return await bot_admin_apply_api(payload)
-
-@app.get("/api/admin/tools/bot-admin/apply/status")
-async def tools_bot_admin_apply_status(_: bool = Depends(require_auth)):
-    return await bot_admin_apply_status_api()
 
 @app.exception_handler(401)
 async def auth_exception_handler(request: Request, exc):

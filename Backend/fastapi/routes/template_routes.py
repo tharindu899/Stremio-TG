@@ -197,21 +197,6 @@ async def edit_media_page(request: Request, tmdb_id: int, db_index: int, media_t
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-    move_streams = 0
-    move_episodes = 0
-    move_messages = 0
-    if str(media_type).lower() in {"tv", "series"}:
-        for season in media_details.get("seasons") or []:
-            for episode in season.get("episodes") or []:
-                move_episodes += 1
-                for quality in episode.get("telegram") or []:
-                    move_streams += 1
-                    move_messages += len(quality.get("parts") or []) or 1
-    else:
-        for quality in media_details.get("telegram") or []:
-            move_streams += 1
-            move_messages += len(quality.get("parts") or []) or 1
-
     api_tokens = await db.get_all_api_tokens()
     api_token = api_tokens[0].get("token") if api_tokens else None
 
@@ -225,12 +210,7 @@ async def edit_media_page(request: Request, tmdb_id: int, db_index: int, media_t
         "db_index": db_index,
         "media_type": media_type,
         "media_details": media_details,
-        "api_token": api_token,
-        "move_summary": {
-            "streams": move_streams,
-            "episodes": move_episodes,
-            "messages": move_messages,
-        },
+        "api_token": api_token
     })
 
 async def public_status_page(request: Request):

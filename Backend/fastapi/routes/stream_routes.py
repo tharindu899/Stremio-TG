@@ -20,7 +20,6 @@ from Backend.pyrofork.bot import work_loads, multi_clients, client_dc_map, clien
 from Backend.fastapi.security.tokens import verify_token
 from Backend.helper.subtitle_constants import subtitle_mime_type
 from Backend.helper.telegram_sessions import userbot_is_usable
-from Backend.helper.chat_ids import to_telegram_chat_id
 
 router = APIRouter(tags=["Streaming"])
 
@@ -131,10 +130,7 @@ async def stream_handler(request: Request, token: str, id: str, name: str, token
     msg_id = decoded.get("msg_id")
     if not msg_id:
         raise HTTPException(status_code=400, detail="Missing id")
-    try:
-        chat_id = to_telegram_chat_id(decoded.get("chat_id"))
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="Invalid channel ID")
+    chat_id = int(f"-100{decoded['chat_id']}")
     return await media_streamer(
         request=request,
         chat_id=chat_id,

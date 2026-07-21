@@ -96,16 +96,10 @@ async def delete_message(chat_id: int, msg_id: int):
     await delete_messages_batch(chat_id, [msg_id])
 
 
-async def delete_messages_batch(chat_id: int, msg_ids: List[int], *, quiet: bool = False) -> List[int]:
-    """Delete messages and return IDs that could not be removed.
-
-    Existing callers may ignore the return value. Transactional workflows such
-    as Media → Edit moves use it to report partial permission failures.
-    """
+async def delete_messages_batch(chat_id: int, msg_ids: List[int]):
     if not msg_ids:
-        return []
+        return
 
-    failed: List[int] = []
     for i in range(0, len(msg_ids), DELETE_BATCH_SIZE):
         chunk = msg_ids[i:i + DELETE_BATCH_SIZE]
 
@@ -113,20 +107,18 @@ async def delete_messages_batch(chat_id: int, msg_ids: List[int], *, quiet: bool
         # avoids unnecessary bot permission/ownership errors in channels where
         # USER_SESSION_STRING can delete older posts successfully.
         if _userbot_usable():
-            remaining = await _delete_chunk(Userbot, "Userbot", chat_id, chunk, quiet=quiet)
+            remaining = await _delete_chunk(Userbot, "Userbot", chat_id, chunk)
 
             if remaining:
-                if not quiet:
-                    LOGGER.info(
-                        f"[STREAMBOT] Fallback triggered: deleting {len(remaining)} "
-                        f"message(s) in {chat_id}"
-                    )
-                remaining = await _delete_chunk(StreamBot, "StreamBot", chat_id, remaining, quiet=quiet)
+                LOGGER.info(
+                    f"[STREAMBOT] Fallback triggered: deleting {len(remaining)} "
+                    f"message(s) in {chat_id}"
+                )
+                remaining = await _delete_chunk(StreamBot, "StreamBot", chat_id, remaining)
         else:
-            remaining = await _delete_chunk(StreamBot, "StreamBot", chat_id, chunk, quiet=quiet)
+            remaining = await _delete_chunk(StreamBot, "StreamBot", chat_id, chunk)
 
         if remaining:
-            failed.extend(remaining)
             LOGGER.error(
                 f"Could not delete {len(remaining)} message(s) in {chat_id} "
                 f"using Userbot and StreamBot" if _userbot_usable() else
@@ -136,23 +128,19 @@ async def delete_messages_batch(chat_id: int, msg_ids: List[int], *, quiet: bool
 
         await sleep(1)
 
-    return failed
 
-
-async def _delete_chunk(client, client_label: str, chat_id: int, msg_ids: List[int], *, quiet: bool = False) -> List[int]:
+async def _delete_chunk(client, client_label: str, chat_id: int, msg_ids: List[int]) -> List[int]:
     global _userbot_session_dead
     try:
         await client.delete_messages(chat_id=chat_id, message_ids=msg_ids)
-        if not quiet:
-            LOGGER.info(f"[{client_label.upper()}] Deleted {len(msg_ids)} message(s) in {chat_id}")
+        LOGGER.info(f"[{client_label.upper()}] Deleted {len(msg_ids)} message(s) in {chat_id}")
         return []
     except FloodWait as e:
         LOGGER.warning(f"[{client_label.upper()}] FloodWait detected: sleeping {e.value}s ({len(msg_ids)} msg(s) in {chat_id})")
         await sleep(e.value)
         try:
             await client.delete_messages(chat_id=chat_id, message_ids=msg_ids)
-            if not quiet:
-                LOGGER.info(f"[{client_label.upper()}] Deleted {len(msg_ids)} message(s) in {chat_id} after FloodWait retry")
+            LOGGER.info(f"[{client_label.upper()}] Deleted {len(msg_ids)} message(s) in {chat_id} after FloodWait retry")
             return []
         except Exception as e2:
             LOGGER.error(f"[{client_label.upper()}] Retry after FloodWait failed in {chat_id}: {e2}")
