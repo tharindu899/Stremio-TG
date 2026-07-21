@@ -20,6 +20,23 @@ ADDON_NAME = "Stremio-TG"
 ADDON_VERSION = __version__
 PAGE_SIZE = 15
 
+
+def build_proxy_url(original_url: str) -> str | None:
+    """Wrap a delivery URL with the configured plain proxy or MediaFlow Proxy."""
+    settings = SettingsManager.current()
+    base = settings.http_proxy_url.strip()
+    if not base:
+        return None
+
+    if settings.mediaflow_proxy:
+        proxy_url = f"{base.rstrip('/')}/proxy/stream?d={quote(original_url, safe='')}"
+        if settings.mediaflow_password:
+            proxy_url += f"&api_password={quote(settings.mediaflow_password, safe='')}"
+        return proxy_url
+
+    return f"{base}{original_url}"
+
+
 # Define available genres
 GENRES = [
     "Action", "Adventure", "Animation", "Biography", "Comedy",
@@ -509,7 +526,7 @@ async def get_streams(
                 original_url = delivery_url(
                     request, token, quality.get("id"), "video.mkv"
                 )
-                proxy_url = f"{SettingsManager.current().http_proxy_url}{original_url}" if SettingsManager.current().http_proxy_url else None
+                proxy_url = build_proxy_url(original_url)
 
                 if SettingsManager.current().show_proxy_and_non_proxy_both and proxy_url:
                     streams.append({

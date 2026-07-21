@@ -22,6 +22,20 @@ function togglePwdVisibility() {
     icon.className = isHidden ? 'fa-solid fa-eye-slash' : 'fa-solid fa-eye';
 }
 
+function toggleMediaFlowPasswordVisibility() {
+    const input = byId('mediaflow_password');
+    const icon = byId('mediaflow-eye-icon');
+    if (!input || !icon) return;
+    const isHidden = input.type === 'password';
+    input.type = isHidden ? 'text' : 'password';
+    icon.className = isHidden ? 'fa-solid fa-eye-slash' : 'fa-solid fa-eye';
+}
+
+function toggleMediaFlowFields() {
+    const enabled = Boolean(byId('mediaflow_proxy')?.checked);
+    byId('mediaflow-password-fields')?.classList.toggle('is-hidden', !enabled);
+}
+
 function escapeHtmlAttr(value) {
     return String(value ?? '')
         .replace(/&/g, '&amp;')
@@ -93,6 +107,8 @@ async function saveSettings() {
         payment_qr_url: byId('payment_qr_url')?.value.trim() || '',
         approver_ids: collectList('approver_ids').map(Number).filter(Number.isFinite),
         http_proxy_url: byId('http_proxy_url')?.value.trim() || '',
+        mediaflow_proxy: Boolean(byId('mediaflow_proxy')?.checked),
+        mediaflow_password: byId('mediaflow_password')?.value || '',
         show_proxy_and_non_proxy_both: Boolean(byId('show_proxy_and_non_proxy_both')?.checked),
         multi_tokens: collectList('multi_tokens'),
         extra_databases: collectList('extra_databases'),
@@ -104,7 +120,7 @@ async function saveSettings() {
     // Keep the saved server value unless the user explicitly edits a non-empty value.
     [
         'tmdb_api', 'base_url', 'upstream_repo', 'upstream_branch',
-        'http_proxy_url', 'subscription_url', 'payment_instructions', 'payment_qr_url',
+        'http_proxy_url', 'subscription_url', 'payment_instructions', 'payment_qr_url', 'mediaflow_password',
     ].forEach((key) => {
         if (!payload[key]) delete payload[key];
     });
@@ -168,6 +184,7 @@ function renderSettings(settings) {
     byId('upload_status_messages').checked = Boolean(settings.upload_status_messages);
     byId('subscription').checked = Boolean(settings.subscription);
     byId('show_proxy_and_non_proxy_both').checked = Boolean(settings.show_proxy_and_non_proxy_both);
+    byId('mediaflow_proxy').checked = Boolean(settings.mediaflow_proxy);
     byId('global_search').checked = Boolean(settings.global_search);
 
     byId('admin_username').value = settings.admin_username || '';
@@ -182,6 +199,7 @@ function renderSettings(settings) {
     byId('payment_instructions').value = settings.payment_instructions || '';
     byId('payment_qr_url').value = settings.payment_qr_url || '';
     byId('http_proxy_url').value = settings.http_proxy_url || '';
+    byId('mediaflow_password').value = '';
 
     rebuildSimpleList('auth_channels_items', settings.auth_channels, 'text');
     rebuildSimpleList('approver_ids_items', settings.approver_ids, 'number');
@@ -196,6 +214,7 @@ function renderSettings(settings) {
 
     toggleSubFields();
     toggleGlobalSearchFields();
+    toggleMediaFlowFields();
 }
 
 function rebuildSimpleList(containerId, values, inputType) {
@@ -363,6 +382,7 @@ async function restartApp() {
 document.addEventListener('DOMContentLoaded', () => {
     toggleSubFields();
     toggleGlobalSearchFields();
+    toggleMediaFlowFields();
     loadDbStats();
     loadLogs();
 

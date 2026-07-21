@@ -1307,6 +1307,8 @@ async def get_settings_api() -> dict:
     # Never expose the raw password — let the UI know whether one is set
     data["admin_password_set"] = bool(data.get("admin_password"))
     data["admin_password"] = ""
+    data["mediaflow_password_set"] = bool(data.get("mediaflow_password"))
+    data["mediaflow_password"] = ""
     data["admin_credentials_source"] = (
         "environment" if get_environment_admin_credentials() else "database"
     )
@@ -1325,6 +1327,8 @@ async def update_settings_api(payload: dict) -> dict:
     # Empty password string → don't change it
     if "admin_password" in payload and not str(payload["admin_password"]).strip():
         del payload["admin_password"]
+    if "mediaflow_password" in payload and not str(payload["mediaflow_password"]).strip():
+        del payload["mediaflow_password"]
 
     # The Settings page saves one full form. A stale or partially loaded browser
     # must not erase working API/base URL values with empty inputs. Clearing one
@@ -1343,7 +1347,7 @@ async def update_settings_api(payload: dict) -> dict:
     # ── Type coercion & validation ────────────────────────────────────────────
     bool_keys = {
         "replace_mode", "hide_catalog", "subscription",
-        "show_proxy_and_non_proxy_both", "upload_status_messages",
+        "show_proxy_and_non_proxy_both", "mediaflow_proxy", "upload_status_messages",
     }
     for key in bool_keys:
         if key in payload:
@@ -1402,7 +1406,7 @@ async def update_settings_api(payload: dict) -> dict:
 
     # Strip whitespace from string fields
     for key in ("tmdb_api", "base_url", "upstream_repo", "upstream_branch",
-                "admin_username", "admin_password", "http_proxy_url", "subscription_url",
+                "admin_username", "admin_password", "http_proxy_url", "mediaflow_password", "subscription_url",
                 "payment_instructions", "payment_qr_url"):
         if key in payload and isinstance(payload[key], str):
             payload[key] = payload[key].strip()

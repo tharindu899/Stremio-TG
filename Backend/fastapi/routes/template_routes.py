@@ -349,6 +349,8 @@ async def settings_page(request: Request, _: bool = Depends(require_auth)):
         "environment" if get_environment_admin_credentials() else "database"
     )
     settings["admin_password"] = ""
+    settings["mediaflow_password_set"] = bool(settings.get("mediaflow_password"))
+    settings["mediaflow_password"] = ""
 
     try:
         settings["database_list"] = db.get_database_list()

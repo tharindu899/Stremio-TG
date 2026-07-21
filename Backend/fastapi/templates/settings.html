@@ -109,8 +109,13 @@
 
       <section id="delivery" class="config-section">
         <div class="config-section-head"><span class="config-step">06</span><div><h2>Stream delivery</h2><p>Configure an optional HTTP proxy and decide whether direct links remain visible.</p></div></div>
-        <label class="field-block"><span>HTTP proxy URL</span><input type="url" id="http_proxy_url" value="{{ settings.http_proxy_url }}" placeholder="http://username:password@host:port"><small>Leave empty to use direct Telegram delivery only.</small></label>
-        <label class="switch-option"><input type="checkbox" id="show_proxy_and_non_proxy_both" {% if settings.show_proxy_and_non_proxy_both %}checked{% endif %}><span class="switch-track"></span><span class="switch-copy"><strong>Show both stream types</strong><small>Expose proxied and direct stream URLs together in Stremio.</small></span></label>
+        <label class="field-block"><span>HTTP / MediaFlow proxy URL</span><input type="url" id="http_proxy_url" value="{{ settings.http_proxy_url }}" placeholder="https://proxy.example.com" oninput="toggleMediaFlowFields()"><small>For MediaFlow, enter only the server base URL. TG Stremio adds <code>/proxy/stream</code> automatically.</small></label>
+        <label class="switch-option"><input type="checkbox" id="mediaflow_proxy" {% if settings.mediaflow_proxy %}checked{% endif %} onchange="toggleMediaFlowFields()"><span class="switch-track"></span><span class="switch-copy"><strong>Use MediaFlow proxy format</strong><small>Wrap each delivery link as <code>/proxy/stream?d=&lt;encoded-url&gt;</code> instead of plain URL-prefix mode.</small></span></label>
+        <div id="mediaflow-password-fields" class="conditional-fields{% if not settings.mediaflow_proxy %} is-hidden{% endif %}">
+          <label class="field-block"><span>MediaFlow API password <em>optional</em></span><div class="password-control"><input type="password" id="mediaflow_password" placeholder="Leave blank to keep the current password" autocomplete="new-password"><button type="button" onclick="toggleMediaFlowPasswordVisibility()" aria-label="Show or hide MediaFlow password"><i id="mediaflow-eye-icon" class="fa-solid fa-eye"></i></button></div>{% if settings.mediaflow_password_set is defined and settings.mediaflow_password_set %}<small class="field-ok"><i class="fa-solid fa-circle-check"></i> MediaFlow password is configured</small>{% endif %}</label>
+          <div class="callout-info"><i class="fa-solid fa-circle-info"></i><p>Example output: <code>https://proxy.example.com/proxy/stream?d=...&amp;api_password=...</code>. Leave the password empty only when your MediaFlow server does not require one.</p></div>
+        </div>
+        <label class="switch-option"><input type="checkbox" id="show_proxy_and_non_proxy_both" {% if settings.show_proxy_and_non_proxy_both %}checked{% endif %}><span class="switch-track"></span><span class="switch-copy"><strong>Show both stream types</strong><small>Expose proxied and direct stream URLs together in Stremio. Keep this enabled while testing MediaFlow.</small></span></label>
       </section>
 
       <section id="storage" class="config-section">
@@ -179,5 +184,5 @@
 {% endblock %}
 
 {% block extra_scripts %}
-<script src="/static/js/pages/settings.js?v=3.6.122" defer></script>
+<script src="/static/js/pages/settings.js?v=3.6.123" defer></script>
 {% endblock %}
