@@ -16,6 +16,7 @@ from Backend.config import Telegram
 from Backend.helper.settings_manager import SettingsManager
 import re
 from Backend.helper.encrypt import decode_string, encode_string
+from Backend.helper.chat_ids import to_stored_chat_id, to_telegram_chat_id
 from Backend.helper.modal import Episode, MovieSchema, QualityDetail, QualityPart, Season, TVShowSchema
 from Backend.helper.task_manager import delete_message, delete_messages_batch
 from Backend.helper.subtitle_parser import normalize_title
@@ -493,7 +494,7 @@ class Database:
         learn from historical posts without deleting or duplicating media.
         """
         try:
-            stream_id = await encode_string({"chat_id": int(channel), "msg_id": int(msg_id)})
+            stream_id = await encode_string({"chat_id": to_stored_chat_id(channel), "msg_id": int(msg_id)})
         except Exception:
             return []
 
@@ -846,7 +847,7 @@ class Database:
         omit it and are treated as direct/raw parts by the delivery route.
         """
         sorted_parts = sorted(parts, key=lambda p: int(p.get("part_number") or 0))
-        payload = {"parts": [{"chat_id": p["chat_id"], "msg_id": p["msg_id"]} for p in sorted_parts]}
+        payload = {"parts": [{"chat_id": to_stored_chat_id(p["chat_id"]), "msg_id": int(p["msg_id"])} for p in sorted_parts]}
         if split_kind:
             payload["split_kind"] = str(split_kind)
         if media_filename:
@@ -1230,14 +1231,11 @@ class Database:
 
     @staticmethod
     def _telegram_chat_id(value: object) -> Optional[int]:
-        """Normalize stored source chat IDs for Pyrogram delete calls."""
+        """Normalize stored source chat IDs for Pyrogram calls."""
         try:
-            chat_id = int(value)
+            return to_telegram_chat_id(value)
         except (TypeError, ValueError):
             return None
-        if chat_id < 0:
-            return chat_id
-        return int(f"-100{chat_id}")
 
     async def _quality_message_refs(self, quality: dict) -> List[Tuple[int, int]]:
         """Return every Telegram source message behind one quality row."""
@@ -1852,6 +1850,104 @@ class Database:
         document = await self.dbs[db_key][collection_name].find_one({"tmdb_id": int(tmdb_id)})
         return convert_objectid_to_str(document) if document else None
 
+    async def get_media_quality(
+        self,
+        *,
+        media_type: str,
+        tmdb_id: int,
+        db_index: int,
+        quality_id: str,
+        season_number: Optional[int] = None,
+        episode_number: Optional[int] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Return one indexed quality row for a transactional Telegram move."""
+        db_key = f"storage_{int(db_index)}"
+        normalized_type = str(media_type or "").lower()
+
+        if normalized_type in {"tv", "series"}:
+            if season_number is None or episode_number is None:
+                return None
+            document = await self.dbs[db_key]["tv"].find_one({"tmdb_id": int(tmdb_id)})
+            if not document:
+                return None
+            for season in document.get("seasons") or []:
+                if int(season.get("season_number", -1)) != int(season_number):
+                    continue
+                for episode in season.get("episodes") or []:
+                    if int(episode.get("episode_number", -1)) != int(episode_number):
+                        continue
+                    for quality in episode.get("telegram") or []:
+                        if quality.get("id") == quality_id:
+                            return dict(quality)
+            return None
+
+        document = await self.dbs[db_key]["movie"].find_one({"tmdb_id": int(tmdb_id)})
+        if not document:
+            return None
+        for quality in document.get("telegram") or []:
+            if quality.get("id") == quality_id:
+                return dict(quality)
+        return None
+
+    async def replace_media_quality_source(
+        self,
+        *,
+        media_type: str,
+        tmdb_id: int,
+        db_index: int,
+        old_quality_id: str,
+        replacement_quality: Dict[str, Any],
+        season_number: Optional[int] = None,
+        episode_number: Optional[int] = None,
+    ) -> bool:
+        """Atomically replace only the selected quality's Telegram references."""
+        db_key = f"storage_{int(db_index)}"
+        normalized_type = str(media_type or "").lower()
+        now = datetime.utcnow()
+
+        if normalized_type in {"tv", "series"}:
+            if season_number is None or episode_number is None:
+                return False
+            result = await self.dbs[db_key]["tv"].update_one(
+                {
+                    "tmdb_id": int(tmdb_id),
+                    "seasons": {
+                        "$elemMatch": {
+                            "season_number": int(season_number),
+                            "episodes": {
+                                "$elemMatch": {
+                                    "episode_number": int(episode_number),
+                                    "telegram.id": old_quality_id,
+                                }
+                            },
+                        }
+                    },
+                },
+                {
+                    "$set": {
+                        "seasons.$[season].episodes.$[episode].telegram.$[quality]": replacement_quality,
+                        "updated_on": now,
+                    }
+                },
+                array_filters=[
+                    {"season.season_number": int(season_number)},
+                    {"episode.episode_number": int(episode_number)},
+                    {"quality.id": old_quality_id},
+                ],
+            )
+            return result.modified_count > 0
+
+        result = await self.dbs[db_key]["movie"].update_one(
+            {"tmdb_id": int(tmdb_id), "telegram.id": old_quality_id},
+            {
+                "$set": {
+                    "telegram.$": replacement_quality,
+                    "updated_on": now,
+                }
+            },
+        )
+        return result.modified_count > 0
+
     async def update_document(
         self, media_type: str, tmdb_id: int, db_index: int, update_data: Dict[str, Any]
     ):
@@ -1917,7 +2013,7 @@ class Database:
             if isinstance(decoded_data, dict) and decoded_data.get("parts"):
                 for part in decoded_data["parts"]:
                     try:
-                        chat_id = int(f"-100{part['chat_id']}")
+                        chat_id = to_telegram_chat_id(part.get("chat_id"))
                         msg_id = int(part["msg_id"])
                         create_task(delete_message(chat_id, msg_id))
                     except Exception as e:
@@ -1925,7 +2021,7 @@ class Database:
                 return
 
             
-            chat_id = int(f"-100{decoded_data['chat_id']}")
+            chat_id = to_telegram_chat_id(decoded_data.get("chat_id"))
             msg_id = int(decoded_data["msg_id"])
             create_task(delete_message(chat_id, msg_id))
         except Exception as e:
@@ -1982,13 +2078,24 @@ class Database:
 
         return None
 
-    async def delete_media_by_stream_id(self, stream_id_hash: str) -> bool:
+    async def delete_media_by_stream_id(self, stream_id_hash: str, delete_file: bool = False) -> bool:
+        """Remove one indexed stream and optionally delete its Telegram source post(s).
+
+        Database removal remains the default for dead-link cleanup. Duplicate cleanup
+        passes ``delete_file=True`` so redundant normal or split uploads are removed
+        from Telegram through the existing safe deletion queue.
+        """
         for i in range(1, self.current_db_index + 1):
             db = self.dbs[f"storage_{i}"]
-            
+
             # Check Movies
             movie = await db["movie"].find_one({"telegram.id": stream_id_hash})
             if movie:
+                for quality in movie.get("telegram", []):
+                    if quality.get("id") == stream_id_hash:
+                        if delete_file:
+                            await self._queue_quality_deletion(quality)
+                        break
                 movie["telegram"] = [q for q in movie.get("telegram", []) if q.get("id") != stream_id_hash]
                 if len(movie["telegram"]) == 0:
                     await db["movie"].delete_one({"_id": movie["_id"]})
@@ -2002,19 +2109,22 @@ class Database:
             if tv:
                 for season in tv.get("seasons", []):
                     for episode in season.get("episodes", []):
-                        for q in episode.get("telegram", []):
-                            if q.get("id") == stream_id_hash:
-                                episode["telegram"] = [t for t in episode.get("telegram", []) if t.get("id") != stream_id_hash]
-                                if len(episode["telegram"]) == 0:
-                                    season["episodes"] = [e for e in season.get("episodes", []) if e.get("episode_number") != episode.get("episode_number")]
-                                    if len(season["episodes"]) == 0:
-                                        tv["seasons"] = [s for s in tv.get("seasons", []) if s.get("season_number") != season.get("season_number")]
-                                        if len(tv["seasons"]) == 0:
-                                            await db["tv"].delete_one({"_id": tv["_id"]})
-                                            return True
-                                tv['updated_on'] = datetime.utcnow()
-                                await db["tv"].replace_one({"_id": tv["_id"]}, tv)
-                                return True
+                        for quality in episode.get("telegram", []):
+                            if quality.get("id") != stream_id_hash:
+                                continue
+                            if delete_file:
+                                await self._queue_quality_deletion(quality)
+                            episode["telegram"] = [t for t in episode.get("telegram", []) if t.get("id") != stream_id_hash]
+                            if len(episode["telegram"]) == 0:
+                                season["episodes"] = [e for e in season.get("episodes", []) if e.get("episode_number") != episode.get("episode_number")]
+                                if len(season["episodes"]) == 0:
+                                    tv["seasons"] = [s for s in tv.get("seasons", []) if s.get("season_number") != season.get("season_number")]
+                                    if len(tv["seasons"]) == 0:
+                                        await db["tv"].delete_one({"_id": tv["_id"]})
+                                        return True
+                            tv['updated_on'] = datetime.utcnow()
+                            await db["tv"].replace_one({"_id": tv["_id"]}, tv)
+                            return True
         return False
 
     async def delete_movie_quality(self, tmdb_id: int, db_index: int, id: str) -> bool:

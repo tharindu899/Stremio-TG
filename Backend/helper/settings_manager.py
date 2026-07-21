@@ -30,6 +30,7 @@ _DEFAULTS: Dict[str, Any] = {
     "extra_databases": [],
     "global_search": False,
     "global_search_channels": [],
+    "better_poster": "",
     "settings_revision": 0,
     "updated_at": "",
 }
@@ -206,6 +207,10 @@ class Settings:
     @property
     def payment_qr_url(self) -> str:
         return str(self._d.get("payment_qr_url") or "")
+
+    @property
+    def better_poster(self) -> str:
+        return str(self._d.get("better_poster") or "").strip()
 
     # ── Integers ─────────────────────────────────────────────────────────────
     @property

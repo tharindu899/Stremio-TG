@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Scanner Tools · TG Stremio{% endblock %}
-{% block extra_head %}<link rel="stylesheet" href="/static/css/pages/tools.css?v=3.6.132">{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="/static/css/pages/tools.css?v=3.6.140">{% endblock %}
 
 {% block content %}
 <div class="studio-page tools-page">
@@ -46,7 +46,33 @@
       <div class="tool-actions"><button class="btn-ui btn-primary" id="dbc-start-btn" onclick="startDbCheck()"><i class="fa-solid fa-play"></i> Run check</button><button class="btn-ui btn-danger" id="dbc-cancel-btn" onclick="cancelDbCheck()" disabled><i class="fa-solid fa-stop"></i> Stop</button></div>
       <div class="dead-link-section"><div class="dead-link-head"><div><label>Dead link queue</label><p>Load links flagged automatically or by the check above.</p></div><div><button class="btn-ui btn-ghost" type="button" onclick="loadFlaggedDeadLinks()"><i class="fa-solid fa-rotate"></i> Load flagged</button><button class="btn-ui btn-danger" id="purge-btn" onclick="purgeDeadLinks()" disabled><i class="fa-solid fa-trash"></i><span id="purge-label">Purge</span></button></div></div><div class="dead-list" id="dead-list"><div class="dead-empty"><i class="fa-solid fa-link-slash"></i><span>No dead links loaded.</span></div></div></div>
     </section>
+
+    <section class="surface tool-workspace duplicate-workspace">
+      <div class="tool-workspace-head"><div><span class="tool-symbol duplicate"><i class="fa-solid fa-clone"></i></span><div><h2>Duplicate Check &amp; Cleanup</h2><p>Find repeated indexed streams, keep the newest copy and safely remove older Telegram files.</p></div></div><span id="dup-status-pill" class="status-pill status-idle">Idle</span></div>
+      <div class="scanner-progress">
+        <div class="scanner-progress-head"><strong id="dup-current">No duplicate scan running</strong><span><i class="fa-regular fa-clock"></i> <b id="dup-elapsed">0s</b></span></div>
+        <div class="progress-track"><div class="progress-fill" id="dup-bar"></div></div>
+      </div>
+      <div class="health-stat-grid duplicate-stats"><div class="scan-stat"><strong id="dup-scanned">0</strong><span>Titles scanned</span></div><div class="scan-stat warning"><strong id="dup-groups">0</strong><span>Groups</span></div><div class="scan-stat danger"><strong id="dup-count">0</strong><span>Redundant</span></div><div class="scan-stat positive"><strong id="dup-purged">0</strong><span>Removed</span></div></div>
+      <div class="tool-actions duplicate-actions"><button class="btn-ui btn-primary" id="dup-start-btn" onclick="startDuplicateCheck()"><i class="fa-solid fa-magnifying-glass"></i> Check duplicates</button><button class="btn-ui btn-danger" id="dup-cancel-btn" onclick="cancelDuplicateCheck()" disabled><i class="fa-solid fa-stop"></i> Stop</button><button class="btn-ui btn-warning" id="dup-selected-btn" onclick="purgeSelectedDuplicates()" disabled><i class="fa-solid fa-trash-arrow-up"></i> Remove selected</button><button class="btn-ui btn-danger" id="dup-all-btn" onclick="purgeAllDuplicates()" disabled><i class="fa-solid fa-broom"></i> Keep newest</button></div>
+      <div id="dup-cleanup" class="cleanup-progress hidden"><div class="scanner-progress-head"><strong id="dup-cleanup-copy">Cleanup ready</strong><span id="dup-cleanup-meta">0 / 0</span></div><div class="progress-track"><div class="progress-fill" id="dup-cleanup-bar"></div></div></div>
+      <div class="duplicate-list" id="duplicate-list"><div class="dead-empty"><i class="fa-solid fa-clone"></i><span>Run a check to find duplicate streams.</span></div></div>
+    </section>
+
+    <section class="surface tool-workspace bot-admin-workspace">
+      <div class="tool-workspace-head"><div><span class="tool-symbol admin"><i class="fa-solid fa-user-shield"></i></span><div><h2>Bot Admin Manager</h2><p>Add the main and streaming bots as channel admins using your configured Telegram user session.</p></div></div><span id="ba-status-pill" class="status-pill status-idle">Idle</span></div>
+      <div class="bot-admin-note"><i class="fa-solid fa-circle-info"></i><p>The user session must be channel owner or an admin with <strong>Add New Admins</strong>. At least two bot tokens are required.</p></div>
+      <div class="tool-actions bot-admin-actions"><button class="btn-ui btn-primary" id="ba-scan-btn" onclick="scanBotAdmins()"><i class="fa-solid fa-rotate"></i> Scan channels</button><button class="btn-ui btn-success" id="ba-apply-btn" onclick="applyBotAdmins()" disabled><i class="fa-solid fa-user-plus"></i> Add selected bots</button></div>
+      <div id="ba-picker" class="bot-admin-picker hidden">
+        <div class="scanner-section"><div class="scanner-label-row"><label>Bots to add</label><button class="text-button" type="button" onclick="selectAllBotAdminBots(true)">Select all</button></div><div id="ba-bots" class="channel-list"></div></div>
+        <div class="scanner-section"><div class="scanner-label-row"><label>Managed channels</label><button class="text-button" type="button" onclick="selectAllBotAdminChannels(true)">Select all manageable</button></div><div id="ba-channels" class="bot-admin-channel-list"></div></div>
+        <label class="admin-cleanup-option"><input id="ba-demote-orphans" type="checkbox"><span><strong>Remove orphan bot admins</strong><small>Demote bot admins that are not part of the currently connected bot set.</small></span></label>
+      </div>
+      <div id="ba-progress" class="cleanup-progress hidden"><div class="scanner-progress-head"><strong id="ba-progress-copy">Applying permissions</strong><span id="ba-progress-meta">0 / 0</span></div><div class="progress-track"><div class="progress-fill" id="ba-progress-bar"></div></div></div>
+      <div id="ba-report" class="bot-admin-report"><div class="dead-empty"><i class="fa-solid fa-user-shield"></i><span>Scan configured channels to review bot administrator access.</span></div></div>
+    </section>
+
   </div>
 </div>
 {% endblock %}
-{% block extra_scripts %}<script src="/static/js/pages/tools.js?v=3.6.132" defer></script>{% endblock %}
+{% block extra_scripts %}<script src="/static/js/pages/tools.js?v=3.6.140" defer></script>{% endblock %}

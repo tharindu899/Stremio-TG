@@ -30,6 +30,14 @@ GENRES = [
 
 # --------------- Helper Functions -----------------
 
+def _poster_url(imdb_id: str, fallback: str) -> str:
+    """Apply the optional Better Poster URL template to Stremio metadata."""
+    template = SettingsManager.current().better_poster
+    if template and imdb_id:
+        return template.replace("{imdb_id}", str(imdb_id))
+    return fallback or ""
+
+
 def convert_to_stremio_meta(item: dict) -> dict:
     media_type = "series" if item.get("media_type") == "tv" else "movie"
     
@@ -37,7 +45,7 @@ def convert_to_stremio_meta(item: dict) -> dict:
         "id": item.get('imdb_id'),
         "type": media_type,
         "name": item.get("title"),
-        "poster": item.get("poster") or "",
+        "poster": _poster_url(item.get("imdb_id"), item.get("poster")),
         "logo": item.get("logo") or "",
         "year": item.get("release_year"),
         "releaseInfo": str(item.get("release_year", "")),
@@ -345,7 +353,7 @@ async def get_meta(token: str, media_type: str, id: str, token_data: dict = Depe
         "year": str(media.get("release_year", "")),
         "imdbRating": str(media.get("rating", "")),
         "genres": media.get("genres", []),
-        "poster": media.get("poster", ""),
+        "poster": _poster_url(media.get("imdb_id") or imdb_id, media.get("poster")),
         "logo": media.get("logo", ""),
         "background": media.get("backdrop", ""),
         "imdb_id": media.get("imdb_id", ""),

@@ -320,6 +320,312 @@ const tmdbId = window.TG_STREMIO_PAGE.tmdbId;
         }
     }
 
+    let availableMoveChannels = [];
+    let pendingMoveChannel = null;
+    let selectedFullMoveChannel = null;
+    let fullMoveBusy = false;
+    let fullMovePollTimer = null;
+    let fullMovePollFailures = 0;
+    let fullMoveLastJob = null;
+    const fullMoveStorageKey = `tg-stremio-full-move:${dbIndex}:${mediaType}:${tmdbId}`;
+
+    function rememberFullMoveJob(jobId, targetName = '') {
+        try {
+            localStorage.setItem(fullMoveStorageKey, JSON.stringify({
+                job_id: String(jobId || ''),
+                target_name: String(targetName || ''),
+                saved_at: Date.now(),
+            }));
+        } catch (_) {}
+    }
+
+    function forgetFullMoveJob() {
+        try { localStorage.removeItem(fullMoveStorageKey); } catch (_) {}
+    }
+
+    function readRememberedFullMoveJob() {
+        try {
+            const raw = localStorage.getItem(fullMoveStorageKey);
+            if (!raw) return null;
+            const value = JSON.parse(raw);
+            return value && value.job_id ? value : null;
+        } catch (_) {
+            return null;
+        }
+    }
+
+    function setFullMoveRunningButton(label = 'Moving full title…') {
+        fullMoveBusy = true;
+        const submit = document.getElementById('full-move-submit');
+        if (submit) {
+            submit.disabled = true;
+            submit.innerHTML = `<span class="loader-ring move-button-loader"></span> ${escapeHtml(label)}`;
+        }
+    }
+
+    function setFullMoveState(message = '', type = 'info') {
+        const state = document.getElementById('full-move-state');
+        if (!state) return;
+        state.textContent = message;
+        state.classList.toggle('hidden', !message);
+        state.classList.toggle('move-state-error', type === 'error');
+        state.classList.toggle('move-state-success', type === 'success');
+    }
+
+    function setAvailableChannelState(message = '', type = 'info') {
+        const state = document.getElementById('available-channel-state');
+        if (!state) return;
+        state.textContent = message;
+        state.classList.toggle('hidden', !message);
+        state.classList.toggle('move-state-error', type === 'error');
+    }
+
+    function renderAvailableChannels() {
+        const list = document.getElementById('available-channel-list');
+        const apply = document.getElementById('available-channel-apply');
+        if (!list) return;
+        if (!availableMoveChannels.length) {
+            list.innerHTML = `<div class="content-empty"><i class="fa-solid fa-tower-broadcast"></i><strong>No available channels</strong><span>Add an AUTH channel in Settings and make the bot an admin.</span></div>`;
+            if (apply) apply.disabled = true;
+            return;
+        }
+        list.innerHTML = availableMoveChannels.map((channel, index) => {
+            const active = pendingMoveChannel && String(pendingMoveChannel.id) === String(channel.id);
+            return `<button type="button" class="available-channel-card${active ? ' active' : ''}" data-channel-index="${index}">
+                <span class="available-channel-icon"><i class="fa-solid fa-bullhorn"></i></span>
+                <span class="available-channel-copy"><strong>${escapeHtml(channel.name || 'Unnamed channel')}</strong><small>Available destination</small></span>
+                <span class="available-channel-check"><i class="fa-solid fa-check"></i></span>
+            </button>`;
+        }).join('');
+        list.querySelectorAll('[data-channel-index]').forEach(button => {
+            button.addEventListener('click', () => selectAvailableChannel(Number(button.dataset.channelIndex)));
+        });
+        if (apply) apply.disabled = !pendingMoveChannel;
+    }
+
+    async function loadAvailableChannels(force = false) {
+        if (availableMoveChannels.length && !force) {
+            renderAvailableChannels();
+            return;
+        }
+        const list = document.getElementById('available-channel-list');
+        if (list) list.innerHTML = `<div class="content-empty"><i class="fa-solid fa-spinner fa-spin"></i><strong>Loading channels</strong><span>Checking configured AUTH channels.</span></div>`;
+        setAvailableChannelState('');
+        try {
+            const response = await fetch(`/api/media/move-title/channels?tmdb_id=${encodeURIComponent(tmdbId)}&db_index=${encodeURIComponent(dbIndex)}&media_type=${encodeURIComponent(mediaType)}`);
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.detail || 'Could not load available channels.');
+            availableMoveChannels = (data.data || []).map((channel, index) => {
+                const id = String(channel.id || '');
+                const resolvedName = String(channel.name || '').trim();
+                const name = resolvedName && resolvedName !== id && !/^-?\d+$/.test(resolvedName)
+                    ? resolvedName
+                    : `AUTH Channel ${index + 1}`;
+                return {id, name};
+            }).filter(channel => channel.id);
+            if (selectedFullMoveChannel && !availableMoveChannels.some(channel => String(channel.id) === String(selectedFullMoveChannel.id))) {
+                selectedFullMoveChannel = null;
+                pendingMoveChannel = null;
+                const selectedName = document.getElementById('full-move-channel-name');
+                if (selectedName) selectedName.textContent = 'No channel selected';
+                const submit = document.getElementById('full-move-submit');
+                if (submit) submit.disabled = true;
+            }
+            renderAvailableChannels();
+            if (!availableMoveChannels.length) {
+                setAvailableChannelState('No other configured AUTH channel is available for this title.', 'error');
+            }
+        } catch (error) {
+            availableMoveChannels = [];
+            if (list) list.innerHTML = `<div class="content-empty content-empty-error"><i class="fa-solid fa-triangle-exclamation"></i><strong>Could not load channels</strong><span>${escapeHtml(error.message || 'Unknown error')}</span></div>`;
+            setAvailableChannelState(error.message || 'Could not load available channels.', 'error');
+        }
+    }
+
+    async function openAvailableChannels() {
+        if (fullMoveBusy) return;
+        pendingMoveChannel = selectedFullMoveChannel ? {...selectedFullMoveChannel} : null;
+        document.getElementById('available-channels-modal')?.classList.remove('hidden');
+        await loadAvailableChannels();
+    }
+
+    function closeAvailableChannels() {
+        if (fullMoveBusy) return;
+        document.getElementById('available-channels-modal')?.classList.add('hidden');
+        pendingMoveChannel = null;
+    }
+
+    function selectAvailableChannel(index) {
+        const channel = availableMoveChannels[index];
+        if (!channel) return;
+        pendingMoveChannel = channel;
+        renderAvailableChannels();
+    }
+
+    function applyAvailableChannel() {
+        if (!pendingMoveChannel) return;
+        selectedFullMoveChannel = {...pendingMoveChannel};
+        const name = document.getElementById('full-move-channel-name');
+        if (name) name.textContent = selectedFullMoveChannel.name;
+        const submit = document.getElementById('full-move-submit');
+        if (submit) submit.disabled = fullMoveBusy;
+        setFullMoveState(`Destination selected: ${selectedFullMoveChannel.name}`);
+        document.getElementById('available-channels-modal')?.classList.add('hidden');
+        pendingMoveChannel = null;
+    }
+
+    function updateFullMoveProgress(job) {
+        fullMoveLastJob = {...(fullMoveLastJob || {}), ...(job || {})};
+        const current = fullMoveLastJob;
+        const box = document.getElementById('full-move-progress');
+        const label = document.getElementById('full-move-progress-label');
+        const percent = document.getElementById('full-move-progress-percent');
+        const bar = document.getElementById('full-move-progress-bar');
+        const files = document.getElementById('full-move-progress-files');
+        const messages = document.getElementById('full-move-progress-messages');
+        const value = Math.max(0, Math.min(100, Number(current.progress || 0)));
+        const copied = Number(current.copied_messages || 0);
+        const skipped = Number(current.skipped_messages || 0);
+        const totalMessages = Number(current.total_messages || 0);
+        const processed = Math.min(totalMessages || copied + skipped, copied + skipped);
+        const movedStreams = Number(current.files_moved || 0);
+        const totalStreams = Number(current.files_total || 0);
+        box?.classList.remove('hidden');
+        if (label) label.textContent = current.message || 'Moving full title…';
+        if (percent) percent.textContent = `${value}%`;
+        if (bar) bar.style.width = `${value}%`;
+        if (files) {
+            files.textContent = current.stage === 'saving' || current.stage === 'cleanup' || current.stage === 'completed'
+                ? `${movedStreams} / ${totalStreams} streams indexed`
+                : `${processed} / ${totalMessages} files processed`;
+        }
+        if (messages) {
+            messages.textContent = `${copied} copied${skipped ? ` · ${skipped} waiting for retry` : ''}`;
+        }
+    }
+
+    function resetFullMoveButton() {
+        fullMoveBusy = false;
+        const submit = document.getElementById('full-move-submit');
+        if (submit) {
+            submit.disabled = !selectedFullMoveChannel;
+            submit.innerHTML = `<i class="fa-solid fa-right-left"></i> Move full ${['tv', 'series'].includes(mediaType) ? 'series' : 'movie'} and remove old`;
+        }
+    }
+
+    async function pollFullTitleMove(jobId) {
+        clearTimeout(fullMovePollTimer);
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 12000);
+        try {
+            const response = await fetch(`/api/media/move-title/status?job_id=${encodeURIComponent(jobId)}&_=${Date.now()}`, {
+                cache: 'no-store',
+                credentials: 'same-origin',
+                signal: controller.signal,
+            });
+            const job = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                const error = new Error(job.detail || 'Could not read move progress.');
+                error.retryable = response.status >= 500 || response.status === 408 || response.status === 429;
+                error.status = response.status;
+                throw error;
+            }
+
+            fullMovePollFailures = 0;
+            rememberFullMoveJob(jobId, job.target_channel || selectedFullMoveChannel?.name || '');
+            updateFullMoveProgress(job);
+
+            if (job.status === 'completed') {
+                forgetFullMoveJob();
+                const warning = job.old_files_removed === false;
+                setFullMoveState(job.message || 'Full title moved.', warning ? 'error' : 'success');
+                showToast(job.message || 'Full title moved.', warning ? 'info' : 'success', warning ? 'Moved with warning' : 'Move complete');
+                setTimeout(() => location.reload(), 1300);
+                return;
+            }
+            if (job.status === 'failed') {
+                forgetFullMoveJob();
+                const error = new Error(job.error || job.message || 'The full-title move failed.');
+                error.retryable = false;
+                throw error;
+            }
+
+            setFullMoveState('Move is running safely in the background. You may keep this page open or return later.');
+            fullMovePollTimer = setTimeout(() => pollFullTitleMove(jobId), 3000);
+        } catch (error) {
+            const retryable = error?.retryable === true || error?.name === 'AbortError' || error instanceof TypeError;
+            if (retryable) {
+                fullMovePollFailures += 1;
+                const retryDelay = Math.min(15000, 3000 + (fullMovePollFailures - 1) * 2000);
+                const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+                const reconnectMessage = offline
+                    ? 'Internet connection is offline. The server move may still be running; reconnecting automatically…'
+                    : 'Progress connection was interrupted. The server move is still protected; reconnecting automatically…';
+                setFullMoveState(reconnectMessage);
+                if (fullMoveLastJob) {
+                    updateFullMoveProgress({...fullMoveLastJob, message: reconnectMessage});
+                }
+                fullMovePollTimer = setTimeout(() => pollFullTitleMove(jobId), retryDelay);
+                return;
+            }
+
+            forgetFullMoveJob();
+            const message = error.message || 'The full-title move failed.';
+            setFullMoveState(message, 'error');
+            showErrorMessage(message);
+            resetFullMoveButton();
+        } finally {
+            clearTimeout(timeout);
+        }
+    }
+
+    function resumeRememberedFullMove() {
+        const remembered = readRememberedFullMoveJob();
+        if (!remembered) return;
+        setFullMoveRunningButton('Reconnecting to move…');
+        setFullMoveState('Restoring the active move progress…');
+        updateFullMoveProgress({progress: 0, message: 'Restoring the active move progress…'});
+        pollFullTitleMove(remembered.job_id);
+    }
+
+    async function startFullTitleMove() {
+        if (fullMoveBusy) return;
+        if (!selectedFullMoveChannel) {
+            setFullMoveState('Choose an available destination channel first.', 'error');
+            await openAvailableChannels();
+            return;
+        }
+        const confirmed = await confirmAction({
+            title: `Move full ${['tv', 'series'].includes(mediaType) ? 'series' : 'movie'}`,
+            subtitle: 'Every indexed stream will be moved together.',
+            message: `Move the complete title to “${selectedFullMoveChannel.name}” and remove old Telegram posts after the index is updated?`,
+            confirmText: `Move full ${['tv', 'series'].includes(mediaType) ? 'series' : 'movie'}`,
+            tone: 'primary'
+        });
+        if (!confirmed) return;
+
+        setFullMoveRunningButton('Starting full move…');
+        const submit = document.getElementById('full-move-submit');
+        setFullMoveState('Starting the safe full-title move…');
+        updateFullMoveProgress({progress: 0, message: 'Starting full-title move…'});
+        try {
+            const response = await fetch(`/api/media/move-title/start?tmdb_id=${tmdbId}&db_index=${dbIndex}&media_type=${mediaType}`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({target_channel: selectedFullMoveChannel.id}),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.detail || 'Could not start the full-title move.');
+            rememberFullMoveJob(data.job_id, selectedFullMoveChannel.name);
+            if (submit) submit.innerHTML = '<span class="loader-ring move-button-loader"></span> Moving full title…';
+            await pollFullTitleMove(data.job_id);
+        } catch (error) {
+            setFullMoveState(error.message || 'Could not start the full-title move.', 'error');
+            showErrorMessage(error.message || 'Could not start the full-title move.');
+            resetFullMoveButton();
+        }
+    }
+
     function showSuccessMessage(message) {
         showToast(message, 'success', 'Success');
     }
@@ -486,10 +792,148 @@ const tmdbId = window.TG_STREMIO_PAGE.tmdbId;
         }
     }
 
+
+    /* ─────────────── Media Edit tab workspace ─────────────── */
+    function switchMediaEditTab(tabName, updateHash = true) {
+        const valid = ['details', 'content', 'subtitles', 'catalog', 'rescan', 'move'];
+        const target = valid.includes(tabName) ? tabName : 'details';
+        document.querySelectorAll('[data-edit-tab]').forEach(button => {
+            const active = button.dataset.editTab === target;
+            button.classList.toggle('active', active);
+            button.setAttribute('aria-selected', active ? 'true' : 'false');
+        });
+        document.querySelectorAll('[data-edit-panel]').forEach(panel => {
+            panel.classList.toggle('active', panel.dataset.editPanel === target);
+        });
+        if (target === 'subtitles') loadMediaSubtitles();
+        if (updateHash && window.history?.replaceState) {
+            window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#${target}`);
+        }
+        document.getElementById('media-edit-tabs')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    let mediaSubtitlesLoaded = false;
+    let mediaSubtitlesLoading = false;
+
+    function subtitleEpisodeLabel(subtitle) {
+        const media = subtitle.media || {};
+        if (CURRENT_MEDIA_TYPE !== 'tv') return 'Movie';
+        const season = Number(media.season);
+        const episode = Number(media.episode);
+        if (!Number.isFinite(season) || !Number.isFinite(episode)) return 'Series';
+        return `S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
+    }
+
+    function renderMediaSubtitles(subtitles) {
+        const list = document.getElementById('media-subtitle-list');
+        const count = document.getElementById('media-subtitle-count');
+        if (!list || !count) return;
+        count.innerHTML = `<i class="fa-solid fa-closed-captioning"></i> ${subtitles.length} matched subtitle${subtitles.length === 1 ? '' : 's'}`;
+        if (!subtitles.length) {
+            list.innerHTML = `<div class="content-empty"><i class="fa-solid fa-closed-captioning"></i><strong>No matched subtitles</strong><span>Scan subtitle channels or use Relink pending after the video is indexed.</span></div>`;
+            return;
+        }
+        list.innerHTML = subtitles.map(subtitle => {
+            const language = subtitle.language_name || String(subtitle.language_code || 'und').toUpperCase();
+            const source = subtitle.chat_id && subtitle.msg_id ? `${subtitle.chat_id} / ${subtitle.msg_id}` : 'Telegram source';
+            const subtitleId = escapeHtml(subtitle._id || '');
+            const subtitleDbIndex = Number(subtitle.subtitle_db_index || subtitle.db_index || 1);
+            return `<article class="media-subtitle-row">
+                <span class="subtitle-language-mark">${escapeHtml(String(subtitle.language_code || 'und').toUpperCase())}</span>
+                <div class="media-subtitle-copy">
+                    <div class="media-subtitle-meta"><strong>${escapeHtml(language)}</strong><span>${escapeHtml(subtitleEpisodeLabel(subtitle))}</span><span>${escapeHtml(subtitle.size || '')}</span></div>
+                    <p title="${escapeHtml(subtitle.filename || '')}">${escapeHtml(subtitle.filename || 'Unnamed subtitle')}</p>
+                    <small><i class="fa-brands fa-telegram"></i> ${escapeHtml(source)} · Storage ${subtitleDbIndex}</small>
+                </div>
+                <button type="button" class="btn-ui btn-danger" onclick="deleteMediaSubtitle('${subtitleId}', ${subtitleDbIndex})" title="Remove subtitle index"><i class="fa-solid fa-trash"></i><span>Remove</span></button>
+            </article>`;
+        }).join('');
+    }
+
+    async function loadMediaSubtitles(force = false) {
+        if (mediaSubtitlesLoading || (mediaSubtitlesLoaded && !force)) return;
+        mediaSubtitlesLoading = true;
+        const list = document.getElementById('media-subtitle-list');
+        const count = document.getElementById('media-subtitle-count');
+        if (list && force) list.innerHTML = `<div class="content-empty"><i class="fa-solid fa-spinner fa-spin"></i><strong>Refreshing subtitles</strong><span>Checking matched subtitle records.</span></div>`;
+        try {
+            const params = new URLSearchParams({
+                media_type: CURRENT_MEDIA_TYPE,
+                tmdb_id: String(CURRENT_TMDB_ID),
+                db_index: String(CURRENT_DB_INDEX),
+            });
+            const response = await fetch(`/api/media/subtitles?${params.toString()}`);
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.detail || 'Could not load subtitles.');
+            renderMediaSubtitles(data.subtitles || []);
+            mediaSubtitlesLoaded = true;
+        } catch (error) {
+            if (count) count.textContent = 'Subtitle list unavailable';
+            if (list) list.innerHTML = `<div class="content-empty content-empty-error"><i class="fa-solid fa-triangle-exclamation"></i><strong>Could not load subtitles</strong><span>${escapeHtml(error.message || 'Unknown error')}</span></div>`;
+        } finally {
+            mediaSubtitlesLoading = false;
+        }
+    }
+
+    async function deleteMediaSubtitle(subtitleId, subtitleDbIndex) {
+        const confirmed = await confirmAction({
+            title: 'Remove subtitle index',
+            subtitle: 'The Telegram subtitle file will stay in its channel.',
+            message: 'Remove this subtitle from the Stremio subtitle list?',
+            confirmText: 'Remove subtitle',
+            tone: 'danger'
+        });
+        if (!confirmed) return;
+        try {
+            const params = new URLSearchParams({ subtitle_db_index: String(subtitleDbIndex) });
+            const response = await fetch(`/api/media/subtitles/${encodeURIComponent(subtitleId)}?${params.toString()}`, { method: 'DELETE' });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.detail || 'Could not remove subtitle.');
+            showToast(data.message || 'Subtitle removed.', 'success', 'Subtitles');
+            mediaSubtitlesLoaded = false;
+            await loadMediaSubtitles(true);
+        } catch (error) {
+            showToast(error.message || 'Could not remove subtitle.', 'error', 'Subtitles');
+        }
+    }
+
+    async function relinkMediaSubtitles() {
+        const button = document.getElementById('media-subtitle-relink');
+        if (button) button.disabled = true;
+        try {
+            const response = await fetch('/api/subtitles/relink', {
+                method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ limit: 1000 })
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.detail || 'Could not relink subtitles.');
+            showToast(data.message || 'Subtitle relink complete.', 'success', 'Subtitles');
+            mediaSubtitlesLoaded = false;
+            await loadMediaSubtitles(true);
+        } catch (error) {
+            showToast(error.message || 'Could not relink subtitles.', 'error', 'Subtitles');
+        } finally {
+            if (button) button.disabled = false;
+        }
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
+        const requestedTab = window.location.hash.replace('#', '');
+        switchMediaEditTab(['details', 'content', 'subtitles', 'catalog', 'rescan', 'move'].includes(requestedTab) ? requestedTab : 'details', false);
+        loadMediaSubtitles();
         const select = document.getElementById('custom-catalog-select');
         if (select) select.addEventListener('change', updateCatalogDropdownStatus);
         loadMediaCatalogDropdown();
+        resumeRememberedFullMove();
+        window.addEventListener('online', () => {
+            const remembered = readRememberedFullMoveJob();
+            if (remembered && fullMoveBusy) {
+                clearTimeout(fullMovePollTimer);
+                pollFullTitleMove(remembered.job_id);
+            }
+        });
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape') closeAvailableChannels();
+        });
         document.querySelectorAll('.season-content').forEach((content, index) => {
             if (index > 0) {
                 content.classList.add('season-collapsed');

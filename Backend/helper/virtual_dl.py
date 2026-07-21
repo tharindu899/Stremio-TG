@@ -6,6 +6,7 @@ from fastapi import Request
 
 from Backend.logger import LOGGER
 from Backend.helper.custom_dl import ByteStreamer
+from Backend.helper.chat_ids import to_telegram_chat_id
 
 
 async def resolve_virtual_parts(
@@ -17,7 +18,7 @@ async def resolve_virtual_parts(
     parts: List[Dict] = []
     cum = 0
     for idx, p in enumerate(parts_payload):
-        chat_id = int(f"-100{p['chat_id']}")
+        chat_id = to_telegram_chat_id(p.get("chat_id"))
         msg_id = int(p["msg_id"])
         file_id = await streamer.get_file_properties(chat_id=chat_id, message_id=msg_id)
         size = file_id.file_size

@@ -1,12 +1,17 @@
 import asyncio
 import json
+import os
+import sys
 from datetime import datetime
 from fastapi import Request, Query, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
+from pyrogram.enums import ChatMemberStatus, ChatMembersFilter
+from pyrogram.errors import FloodWait
+from pyrogram.types import ChatPrivileges
 from Backend import db, StartTime, __version__
 from Backend.logger import LOGGER
 from Backend.helper.settings_manager import SettingsManager, get_environment_admin_credentials
-from Backend.helper.pyro import get_readable_time
+from Backend.helper.pyro import get_readable_file_size, get_readable_time
 from Backend.helper.metadata import (
     search_movie_candidates,
     search_tv_candidates,
@@ -15,6 +20,12 @@ from Backend.helper.metadata import (
 )
 from Backend.pyrofork.bot import multi_clients, StreamBot, Userbot
 from Backend.helper.telegram_sessions import userbot_is_usable
+from Backend.helper.media_mover import (
+    MediaMoveError,
+    start_full_media_move,
+    get_full_media_move_status,
+    list_full_media_move_channels,
+)
 from Backend.helper.custom_dl import run_speed_test, _speed_test_single_client
 from time import time
 from Backend.helper.auto_catalog import (
@@ -34,6 +45,115 @@ from Backend.helper.tag_catalog import (
 from Backend.helper.settings_manager import SettingsManager
 
 
+
+
+# ── System & Maintenance ─────────────────────────────────────────────────────
+
+LOG_FILE = "log.txt"
+
+
+async def get_db_stats_api() -> dict:
+    """Aggregate content and storage metrics across every connected storage DB."""
+    try:
+        total_movies = 0
+        total_tv = 0
+        total_episodes = 0
+        total_streams = 0
+        total_db_size = 0
+
+        storage_keys = sorted(
+            (key for key in db.dbs if key.startswith("storage_")),
+            key=lambda key: int(key.split("_", 1)[1]),
+        )
+
+        for storage_key in storage_keys:
+            storage = db.dbs.get(storage_key)
+            if storage is None:
+                continue
+
+            total_movies += await storage["movie"].count_documents({})
+            async for movie in storage["movie"].find({}, {"telegram": 1}):
+                total_streams += len(movie.get("telegram") or [])
+
+            total_tv += await storage["tv"].count_documents({})
+            async for show in storage["tv"].find({}, {"seasons": 1}):
+                for season in show.get("seasons") or []:
+                    for episode in season.get("episodes") or []:
+                        total_episodes += 1
+                        total_streams += len(episode.get("telegram") or [])
+
+            try:
+                total_db_size += int((await storage.command("dbStats")).get("dataSize", 0))
+            except Exception:
+                pass
+
+        return {
+            "status": "success",
+            "data": {
+                "version": __version__,
+                "movies": total_movies,
+                "tv_shows": total_tv,
+                "episodes": total_episodes,
+                "streams": total_streams,
+                "uptime": get_readable_time(int(time() - StartTime)),
+                "db_size": get_readable_file_size(total_db_size),
+                "storage_dbs": len(storage_keys),
+                "auth_channels": len(SettingsManager.current().auth_channels),
+            },
+        }
+    except Exception as exc:
+        LOGGER.error(f"[Stats] Error: {exc}")
+        return {"status": "error", "message": str(exc)}
+
+
+async def health_api() -> dict:
+    """Lightweight liveness probe used by the restart overlay."""
+    return {"status": "ok", "start_time": StartTime, "version": __version__}
+
+
+async def get_logs_api(lines: int = 300) -> dict:
+    """Return the requested tail of the application log."""
+    path = os.path.abspath(LOG_FILE)
+    if not os.path.exists(path):
+        return {"status": "error", "message": "Log file not found.", "log": ""}
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as handle:
+            tail = handle.readlines()[-max(1, min(lines, 2000)):]
+        return {"status": "success", "log": "".join(tail)}
+    except Exception as exc:
+        return {"status": "error", "message": str(exc), "log": ""}
+
+
+async def download_logs_api():
+    """Download the raw application log."""
+    path = os.path.abspath(LOG_FILE)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Log file not found.")
+    return FileResponse(path, filename="log.txt", media_type="text/plain")
+
+
+async def _perform_restart(delay: float = 1.0) -> None:
+    """Run update.py, then replace this process with a fresh Backend process."""
+    await asyncio.sleep(delay)
+    try:
+        LOGGER.info("Web-triggered restart: running updater...")
+        process = await asyncio.create_subprocess_exec(sys.executable, "update.py")
+        await process.wait()
+        if process.returncode:
+            LOGGER.warning(f"Web-triggered updater exited with code {process.returncode}.")
+    except Exception as exc:
+        LOGGER.error(f"Restart updater failed: {exc}")
+
+    LOGGER.info("Web-triggered restart: re-executing app...")
+    os.execl(sys.executable, sys.executable, "-m", "Backend")
+
+
+async def restart_app_api() -> dict:
+    asyncio.create_task(_perform_restart())
+    return {
+        "status": "success",
+        "message": "Restart initiated — the server will be back shortly.",
+    }
 
 
 # --- API Routes for System Stats ---
@@ -186,6 +306,69 @@ async def get_media_details_api(
             raise HTTPException(status_code=404, detail="Media not found")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+async def media_title_move_channels_api(tmdb_id: int, db_index: int, media_type: str):
+    normalized_type = str(media_type or "").strip().lower()
+    if normalized_type not in {"movie", "tv", "series"}:
+        raise HTTPException(status_code=400, detail="media_type must be movie or tv.")
+    try:
+        channels = await list_full_media_move_channels(
+            db,
+            tmdb_id=int(tmdb_id),
+            db_index=int(db_index),
+            media_type=normalized_type,
+        )
+        return {"status": "success", "data": channels}
+    except MediaMoveError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except Exception as exc:
+        LOGGER.exception("[MediaMove] Could not load title destinations: %s", exc)
+        raise HTTPException(status_code=500, detail="Could not load available move destinations.")
+
+
+async def start_media_title_move_api(
+    request: Request, tmdb_id: int, db_index: int, media_type: str
+):
+    normalized_type = str(media_type or "").strip().lower()
+    if normalized_type not in {"movie", "tv", "series"}:
+        raise HTTPException(status_code=400, detail="media_type must be movie or tv.")
+
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    target_channel = str(payload.get("target_channel") or "").strip()
+    if not target_channel:
+        raise HTTPException(status_code=400, detail="Choose a destination channel.")
+
+    try:
+        return await start_full_media_move(
+            db,
+            tmdb_id=int(tmdb_id),
+            db_index=int(db_index),
+            media_type=normalized_type,
+            target_channel=target_channel,
+        )
+    except MediaMoveError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except Exception as exc:
+        LOGGER.exception("[MediaMove] Could not start full-title move: %s", exc)
+        raise HTTPException(status_code=500, detail="Could not start the full-title move.")
+
+
+async def media_title_move_status_api(job_id: str):
+    try:
+        payload = get_full_media_move_status(job_id)
+        return JSONResponse(
+            payload,
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+            },
+        )
+    except MediaMoveError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
 
 async def delete_movie_quality_api(tmdb_id: int, db_index: int, id: str):
     try:
@@ -1173,6 +1356,14 @@ async def update_settings_api(payload: dict) -> dict:
                 raise HTTPException(status_code=400, detail=f"'{key}' must be a list.")
             payload[key] = [str(v).strip() for v in payload[key] if str(v).strip()]
 
+    if "better_poster" in payload:
+        payload["better_poster"] = str(payload["better_poster"] or "").strip()
+        if payload["better_poster"] and "{imdb_id}" not in payload["better_poster"]:
+            raise HTTPException(
+                status_code=400,
+                detail="Better Poster URL must contain the {imdb_id} placeholder.",
+            )
+
     if "extra_databases" in payload:
         for uri in payload["extra_databases"]:
             if not uri.startswith(("mongodb://", "mongodb+srv://")):
@@ -1376,3 +1567,440 @@ async def purge_dead_links_api(payload: dict | None = None) -> dict:
         result = await dbcheck_manager.purge()
 
     return {"status": "success" if result.get("ok") else "error", **result}
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Duplicate check & cleanup
+# ─────────────────────────────────────────────────────────────────────────────
+async def start_duplicate_check_api() -> dict:
+    from Backend.helper.scan_manager import duplicate_manager
+    result = await duplicate_manager.start()
+    if not result.get("ok"):
+        raise HTTPException(status_code=409, detail=result.get("message", "Could not start duplicate scan."))
+    return {"status": "success", **result}
+
+
+async def cancel_duplicate_check_api() -> dict:
+    from Backend.helper.scan_manager import duplicate_manager
+    result = await duplicate_manager.cancel()
+    return {"status": "success" if result.get("ok") else "error", **result}
+
+
+async def duplicate_check_status_api() -> dict:
+    from Backend.helper.scan_manager import duplicate_manager
+    return {"status": "success", "data": duplicate_manager.get_status()}
+
+
+async def purge_duplicates_api(payload: dict | None = None) -> dict:
+    from Backend.helper.scan_manager import duplicate_manager
+    payload = payload or {}
+    stream_ids = payload.get("stream_ids")
+    if stream_ids is not None and not isinstance(stream_ids, list):
+        raise HTTPException(status_code=400, detail="stream_ids must be a list.")
+    result = await duplicate_manager.purge(
+        stream_ids=stream_ids,
+        delete_all=bool(payload.get("delete_all")),
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=409, detail=result.get("message", "Could not start duplicate cleanup."))
+    return {"status": "success", **result}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Bot Admin Manager — use the configured user session to add stream bots as
+#  admins in every configured service channel.
+# ─────────────────────────────────────────────────────────────────────────────
+_bot_admin_apply_state: dict = {
+    "running": False,
+    "status": "idle",
+    "total": 0,
+    "done": 0,
+    "results": [],
+    "error": "",
+    "task": None,
+}
+
+
+def _norm_chat_id(ch):
+    value = str(ch).strip()
+    if not value:
+        return None
+    return int(value) if value.lstrip("-").isdigit() else value
+
+
+async def _managed_bots() -> list[dict]:
+    bots: list[dict] = []
+    for client_id in sorted(multi_clients.keys()):
+        client = multi_clients.get(client_id)
+        if client is None:
+            continue
+        me = getattr(client, "me", None)
+        if me is None:
+            try:
+                me = await client.get_me()
+            except Exception as exc:
+                LOGGER.warning("[BotAdmin] Could not resolve bot client %s: %s", client_id, exc)
+                continue
+        bots.append({
+            "client_id": client_id,
+            "user_id": me.id,
+            "username": me.username,
+            "name": me.first_name or me.username or f"Bot {client_id + 1}",
+            "is_main": client_id == 0,
+        })
+    return bots
+
+
+def _bot_served_channels() -> list[dict]:
+    settings = SettingsManager.current()
+    order: list[str] = []
+    mapping: dict[str, dict] = {}
+
+    def add(channel, role: str) -> None:
+        normalized = _norm_chat_id(channel)
+        if normalized is None:
+            return
+        key = str(normalized)
+        if key not in mapping:
+            mapping[key] = {"id": normalized, "roles": []}
+            order.append(key)
+        if role not in mapping[key]["roles"]:
+            mapping[key]["roles"].append(role)
+
+    for channel in settings.auth_channels:
+        add(channel, "auth")
+    # Keep forward compatibility with master settings when those channel roles
+    # are enabled later in this customized branch.
+    for channel in getattr(settings, "manual_channels", []) or []:
+        add(channel, "manual")
+    for channel in getattr(settings, "anime_channels", []) or []:
+        add(channel, "anime")
+    for attr, role in (("announcement_channel", "announce"), ("skip_channel", "skip")):
+        channel = getattr(settings, attr, None)
+        if channel:
+            add(channel, role)
+    return [mapping[key] for key in order]
+
+
+def _bot_admin_privileges() -> ChatPrivileges:
+    return ChatPrivileges(
+        can_manage_chat=True,
+        can_post_messages=True,
+        can_edit_messages=True,
+        can_delete_messages=True,
+        can_invite_users=True,
+        can_pin_messages=False,
+        can_promote_members=False,
+        can_change_info=False,
+        can_restrict_members=False,
+        can_manage_video_chats=False,
+        is_anonymous=False,
+    )
+
+
+def _no_privileges() -> ChatPrivileges:
+    return ChatPrivileges(
+        can_manage_chat=False,
+        can_post_messages=False,
+        can_edit_messages=False,
+        can_delete_messages=False,
+        can_invite_users=False,
+        can_pin_messages=False,
+        can_promote_members=False,
+        can_change_info=False,
+        can_restrict_members=False,
+        can_manage_video_chats=False,
+        is_anonymous=False,
+    )
+
+
+async def _bot_member_status(chat_id, bot_user_id) -> str:
+    try:
+        member = await Userbot.get_chat_member(chat_id, bot_user_id)
+        status = member.status
+        if status in (ChatMemberStatus.OWNER, ChatMemberStatus.ADMINISTRATOR):
+            return "admin"
+        if status == ChatMemberStatus.BANNED:
+            return "banned"
+        if status == ChatMemberStatus.RESTRICTED:
+            return "restricted"
+        if status == ChatMemberStatus.MEMBER:
+            return "member"
+        return "missing"
+    except Exception:
+        return "missing"
+
+
+def _friendly_promote_error(exc) -> str:
+    message = str(exc)
+    upper = message.upper()
+    if "CHAT_ADMIN_REQUIRED" in upper:
+        return "The user session is not an admin with the required rights in this channel."
+    if "USER_CREATOR" in upper or "ADMIN_RANK" in upper:
+        return "The channel creator cannot be modified."
+    if "ADD_ADMINS" in upper or ("PROMOTE" in upper and "RIGHT" in upper):
+        return "The user session cannot grant these administrator rights."
+    if "PARTICIPANT" in upper or "USER_NOT_MUTUAL_CONTACT" in upper:
+        return "The bot is not in the channel and could not be added automatically."
+    if "BOTS_TOO_MUCH" in upper:
+        return "This channel already has the maximum number of bots."
+    return message
+
+
+async def _session_rights(chat_id) -> dict:
+    try:
+        member = await Userbot.get_chat_member(chat_id, "me")
+    except Exception as exc:
+        return {"manageable": False, "status": "unknown", "reason": f"Could not check session rights: {exc}"}
+    if member.status == ChatMemberStatus.OWNER:
+        return {"manageable": True, "status": "owner", "reason": ""}
+    if member.status == ChatMemberStatus.ADMINISTRATOR:
+        privileges = getattr(member, "privileges", None)
+        can_promote = bool(privileges and privileges.can_promote_members)
+        return {
+            "manageable": can_promote,
+            "status": "admin_can_promote" if can_promote else "admin_no_promote",
+            "reason": "" if can_promote else "The user session is an admin but does not have Add New Admins permission.",
+        }
+    return {"manageable": False, "status": "not_admin", "reason": "The user session is not an admin in this channel."}
+
+
+async def bot_admin_scan_api() -> dict:
+    if Userbot is None:
+        return {"status": "error", "reason": "no_session", "message": "Configure USER_SESSION_STRING first."}
+    bots = await _managed_bots()
+    if len(bots) <= 1:
+        return {"status": "error", "reason": "single_token", "bots": bots, "message": "Configure at least one extra bot token first."}
+
+    managed_ids = {bot["user_id"] for bot in bots}
+    output: list[dict] = []
+    for channel in _bot_served_channels():
+        chat_id = channel["id"]
+        entry = {
+            "id": str(chat_id),
+            "roles": channel["roles"],
+            "name": str(chat_id),
+            "accessible": False,
+            "manageable": False,
+            "session_status": "",
+            "reason": "",
+            "bots": {},
+            "orphans": [],
+        }
+        try:
+            chat = await Userbot.get_chat(chat_id)
+            entry["name"] = getattr(chat, "title", None) or getattr(chat, "first_name", None) or str(chat_id)
+            entry["accessible"] = True
+        except Exception as exc:
+            entry["reason"] = f"The user session cannot access this channel: {exc}"
+            output.append(entry)
+            continue
+
+        rights = await _session_rights(chat_id)
+        entry["manageable"] = rights["manageable"]
+        entry["session_status"] = rights["status"]
+        entry["reason"] = rights["reason"]
+        for bot in bots:
+            entry["bots"][str(bot["user_id"])] = await _bot_member_status(chat_id, bot["user_id"])
+
+        try:
+            async for member in Userbot.get_chat_members(chat_id, filter=ChatMembersFilter.ADMINISTRATORS):
+                user = getattr(member, "user", None)
+                if user and getattr(user, "is_bot", False) and user.id not in managed_ids:
+                    entry["orphans"].append({
+                        "user_id": user.id,
+                        "username": user.username,
+                        "name": user.first_name or user.username or str(user.id),
+                    })
+        except Exception as exc:
+            LOGGER.warning("[BotAdmin] Could not list admins for %s: %s", chat_id, exc)
+        output.append(entry)
+    return {"status": "success", "data": {"bots": bots, "channels": output}}
+
+
+async def _promote_one(chat_id, bot: dict, privileges: ChatPrivileges, retry: bool = True) -> dict:
+    label = bot.get("name") or (f"@{bot['username']}" if bot.get("username") else str(bot["user_id"]))
+    bot_id = bot["user_id"]
+    if await _bot_member_status(chat_id, bot_id) == "admin":
+        return {"bot": label, "user_id": bot_id, "status": "already", "message": "Already an admin."}
+    try:
+        await Userbot.promote_chat_member(chat_id, bot_id, privileges=privileges)
+        return {"bot": label, "user_id": bot_id, "status": "added", "message": "Promoted to admin."}
+    except FloodWait as exc:
+        wait = int(getattr(exc, "value", getattr(exc, "x", 5)) or 5)
+        if retry:
+            await asyncio.sleep(wait + 1)
+            return await _promote_one(chat_id, bot, privileges, retry=False)
+        return {"bot": label, "user_id": bot_id, "status": "error", "message": f"Telegram rate limit: wait {wait}s and retry."}
+    except Exception as exc:
+        upper = str(exc).upper()
+        if retry and ("PARTICIPANT" in upper or "USER_NOT_MUTUAL_CONTACT" in upper):
+            try:
+                await Userbot.add_chat_members(chat_id, bot_id)
+                await asyncio.sleep(0.5)
+                await Userbot.promote_chat_member(chat_id, bot_id, privileges=privileges)
+                return {"bot": label, "user_id": bot_id, "status": "added", "message": "Added and promoted to admin."}
+            except Exception as nested:
+                return {"bot": label, "user_id": bot_id, "status": "error", "message": _friendly_promote_error(nested)}
+        return {"bot": label, "user_id": bot_id, "status": "error", "message": _friendly_promote_error(exc)}
+
+
+async def _demote_one(chat_id, user) -> dict:
+    label = getattr(user, "first_name", None) or (f"@{user.username}" if getattr(user, "username", None) else str(user.id))
+    try:
+        await Userbot.promote_chat_member(chat_id, user.id, privileges=_no_privileges())
+        return {"bot": label, "user_id": user.id, "status": "demoted", "message": "Orphan bot admin rights removed."}
+    except Exception as exc:
+        return {"bot": label, "user_id": user.id, "status": "error", "message": _friendly_promote_error(exc)}
+
+
+async def _run_bot_admin_apply(channel_ids, selected, demote_orphans, managed_ids) -> None:
+    state = _bot_admin_apply_state
+    privileges = _bot_admin_privileges()
+    try:
+        for raw_channel in channel_ids:
+            chat_id = _norm_chat_id(raw_channel)
+            channel_result = {"id": str(chat_id), "name": str(chat_id), "items": []}
+            try:
+                chat = await Userbot.get_chat(chat_id)
+                channel_result["name"] = getattr(chat, "title", None) or getattr(chat, "first_name", None) or str(chat_id)
+            except Exception as exc:
+                channel_result["items"].append({"bot": "—", "status": "error", "message": f"Channel not accessible: {exc}"})
+                state["results"].append(channel_result)
+                state["done"] += 1
+                continue
+
+            rights = await _session_rights(chat_id)
+            if not rights["manageable"]:
+                channel_result["items"].append({"bot": "—", "status": "skipped", "message": rights["reason"] or "Cannot add admins here."})
+                state["results"].append(channel_result)
+                state["done"] += 1
+                continue
+
+            for bot in selected:
+                channel_result["items"].append(await _promote_one(chat_id, bot, privileges))
+                await asyncio.sleep(0.3)
+
+            if demote_orphans:
+                try:
+                    async for member in Userbot.get_chat_members(chat_id, filter=ChatMembersFilter.ADMINISTRATORS):
+                        user = getattr(member, "user", None)
+                        if user and getattr(user, "is_bot", False) and user.id not in managed_ids:
+                            channel_result["items"].append(await _demote_one(chat_id, user))
+                            await asyncio.sleep(0.3)
+                except Exception as exc:
+                    channel_result["items"].append({"bot": "orphans", "status": "error", "message": f"Could not scan orphan bots: {exc}"})
+
+            state["results"].append(channel_result)
+            state["done"] += 1
+        state["status"] = "completed"
+    except Exception as exc:
+        LOGGER.error("[BotAdmin] Apply run failed: %s", exc)
+        state["status"] = "error"
+        state["error"] = str(exc)
+    finally:
+        state["running"] = False
+
+
+async def bot_admin_apply_api(payload: dict | None = None) -> dict:
+    if Userbot is None:
+        raise HTTPException(status_code=503, detail="No USER_SESSION_STRING is configured.")
+    if _bot_admin_apply_state["running"]:
+        raise HTTPException(status_code=409, detail="A Bot Admin apply run is already active.")
+    payload = payload or {}
+    channel_ids = payload.get("channel_ids") or []
+    if not isinstance(channel_ids, list) or not channel_ids:
+        raise HTTPException(status_code=400, detail="Select at least one channel.")
+    bots = await _managed_bots()
+    if len(bots) <= 1:
+        raise HTTPException(status_code=400, detail="Configure a user session and more than one bot token.")
+    by_id = {str(bot["user_id"]): bot for bot in bots}
+    selected_ids = payload.get("bot_ids")
+    selected = [by_id[str(item)] for item in selected_ids if str(item) in by_id] if isinstance(selected_ids, list) and selected_ids else bots
+    if not selected:
+        raise HTTPException(status_code=400, detail="No matching bots were selected.")
+    _bot_admin_apply_state.update({
+        "running": True,
+        "status": "running",
+        "total": len(channel_ids),
+        "done": 0,
+        "results": [],
+        "error": "",
+    })
+    _bot_admin_apply_state["task"] = asyncio.create_task(
+        _run_bot_admin_apply(
+            channel_ids,
+            selected,
+            bool(payload.get("demote_orphans")),
+            {bot["user_id"] for bot in bots},
+        )
+    )
+    return {"status": "started", "total": len(channel_ids)}
+
+
+async def bot_admin_apply_status_api() -> dict:
+    state = _bot_admin_apply_state
+    return {
+        "status": "success",
+        "data": {
+            "running": state["running"],
+            "state": state["status"],
+            "total": state["total"],
+            "done": state["done"],
+            "results": state["results"],
+            "error": state["error"],
+        },
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Media Edit: subtitles attached to one indexed title
+# ─────────────────────────────────────────────────────────────────────────────
+async def list_media_subtitles_api(media_type: str, tmdb_id: int, db_index: int) -> dict:
+    from Backend.helper.database import convert_objectid_to_str
+
+    media_type = str(media_type or "").strip().lower()
+    if media_type not in {"movie", "tv"}:
+        raise HTTPException(status_code=400, detail="media_type must be movie or tv.")
+
+    query = {
+        "status": "matched",
+        "media.media_type": media_type,
+        "media.tmdb_id": int(tmdb_id),
+        "$or": [
+            {"media.db_index": int(db_index)},
+            {"media.db_index": {"$exists": False}},
+        ],
+    }
+    rows: list[dict] = []
+    for subtitle_db_index in range(1, db.current_db_index + 1):
+        storage = db.dbs.get(f"storage_{subtitle_db_index}")
+        if storage is None:
+            continue
+        cursor = storage["subtitles"].find(query).sort([
+            ("media.season", 1),
+            ("media.episode", 1),
+            ("language_code", 1),
+            ("updated_at", -1),
+        ])
+        async for document in cursor:
+            item = convert_objectid_to_str(document)
+            item["subtitle_db_index"] = subtitle_db_index
+            rows.append(item)
+
+    rows.sort(key=lambda item: (
+        int((item.get("media") or {}).get("season") or -1),
+        int((item.get("media") or {}).get("episode") or -1),
+        str(item.get("language_code") or "und"),
+        str(item.get("filename") or ""),
+    ))
+    return {"status": "success", "subtitles": rows, "total": len(rows)}
+
+
+async def delete_media_subtitle_api(subtitle_id: str, subtitle_db_index: int) -> dict:
+    deleted = await db.delete_subtitle(db_index=int(subtitle_db_index), subtitle_id=subtitle_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Subtitle index row was not found.")
+    return {
+        "status": "success",
+        "message": "Subtitle removed from this index. The Telegram source file was not deleted.",
+    }

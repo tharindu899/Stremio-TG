@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Stremio Guide · TG Stremio{% endblock %}
+{% block content %}
+<section class="mx-auto w-full max-w-4xl px-4 py-8 sm:px-6 sm:py-14">
+  <div class="rounded-3xl border border-border bg-card/90 p-6 shadow-2xl backdrop-blur-xl sm:p-9">
+    <p class="text-xs font-bold uppercase tracking-[0.28em] text-secondary">TG Stremio</p>
+    <h1 class="mt-2 text-3xl font-black text-text">Stremio connection guide</h1>
+    <div class="mt-7 space-y-4 text-text-secondary">
+      <div class="rounded-2xl border border-border bg-background/45 p-5"><strong class="text-text">1. Sign in</strong><p class="mt-2">Open the administrator workspace and create or copy an access token.</p></div>
+      <div class="rounded-2xl border border-border bg-background/45 p-5"><strong class="text-text">2. Copy the manifest URL</strong><p class="mt-2">Use the manifest link shown in the authenticated dashboard. Private token values are not displayed on this public page.</p></div>
+      <div class="rounded-2xl border border-border bg-background/45 p-5"><strong class="text-text">3. Install in Stremio</strong><p class="mt-2">Paste the manifest URL into Stremio’s add-on search field and choose Install.</p></div>
+    </div>
+    <a href="/login" class="mt-7 inline-flex items-center justify-center rounded-xl bg-primary px-5 py-3 text-sm font-extrabold text-white transition hover:opacity-90">Open administrator login</a>
+  </div>
+</section>
+{% endblock %}

@@ -82,6 +82,7 @@ async function saveSettings() {
         admin_password: byId('admin_password')?.value || '',
         tmdb_api: byId('tmdb_api')?.value.trim() || '',
         base_url: byId('base_url')?.value.trim() || '',
+        better_poster: byId('better_poster')?.value.trim() || '',
         upstream_repo: byId('upstream_repo')?.value.trim() || '',
         upstream_branch: byId('upstream_branch')?.value.trim() || '',
         auth_channels: collectList('auth_channels'),
@@ -173,6 +174,7 @@ function renderSettings(settings) {
     byId('admin_password').value = '';
     byId('tmdb_api').value = settings.tmdb_api || '';
     byId('base_url').value = settings.base_url || '';
+    byId('better_poster').value = settings.better_poster || '';
     byId('upstream_repo').value = settings.upstream_repo || '';
     byId('upstream_branch').value = settings.upstream_branch || '';
     byId('subscription_group_id').value = settings.subscription_group_id || 0;
@@ -230,7 +232,142 @@ function rebuildDatabaseList(databaseList) {
     });
 }
 
+const STAT_FIELDS = [
+    ['movies', 'Movies'],
+    ['tv_shows', 'TV shows'],
+    ['episodes', 'Episodes'],
+    ['streams', 'Streams'],
+    ['db_size', 'DB size'],
+    ['storage_dbs', 'Storage DBs'],
+    ['auth_channels', 'AUTH channels'],
+    ['version', 'Version'],
+];
+let logLiveTimer = null;
+
+function spinIcon(button, active) {
+    const icon = button?.querySelector('i');
+    if (icon) icon.classList.toggle('fa-spin', Boolean(active));
+}
+
+async function loadDbStats(button) {
+    const grid = byId('stats-grid');
+    if (!grid) return;
+    spinIcon(button, true);
+    try {
+        const response = await fetch('/api/admin/stats', { cache: 'no-store' });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || data.status !== 'success') {
+            throw new Error(data.message || data.detail || 'Stats request failed');
+        }
+        const stats = data.data || {};
+        grid.innerHTML = STAT_FIELDS.map(([key, label]) => `
+            <div class="stat-box">
+                <strong>${escapeHtml(String(stats[key] ?? '—'))}</strong>
+                <span>${escapeHtml(label)}</span>
+            </div>
+        `).join('');
+    } catch (error) {
+        console.error('Stats load failed:', error);
+        grid.innerHTML = '<div class="maintenance-hint is-error">Failed to load system stats.</div>';
+    } finally {
+        spinIcon(button, false);
+    }
+}
+
+async function loadLogs(button) {
+    const viewer = byId('log-view');
+    if (!viewer) return;
+    spinIcon(button, true);
+    try {
+        const response = await fetch('/api/admin/logs?lines=500', { cache: 'no-store' });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || data.status !== 'success') {
+            throw new Error(data.message || data.detail || 'Log request failed');
+        }
+        const wasNearBottom = viewer.scrollHeight - viewer.scrollTop - viewer.clientHeight < 48;
+        viewer.textContent = data.log || '(log is empty)';
+        if (wasNearBottom) viewer.scrollTop = viewer.scrollHeight;
+    } catch (error) {
+        console.error('Log load failed:', error);
+        viewer.textContent = 'Could not load the application log.';
+    } finally {
+        spinIcon(button, false);
+    }
+}
+
+function toggleLiveLogs() {
+    if (logLiveTimer) {
+        clearInterval(logLiveTimer);
+        logLiveTimer = null;
+    }
+    if (byId('log-live-toggle')?.checked) {
+        loadLogs();
+        logLiveTimer = setInterval(() => loadLogs(), 2000);
+    }
+}
+
+async function restartApp() {
+    if (!window.confirm('Restart the app now? It will be unavailable briefly while updates are applied.')) return;
+
+    let previousStartTime = null;
+    try {
+        const health = await fetch('/api/admin/health', { cache: 'no-store' });
+        previousStartTime = (await health.json()).start_time || null;
+    } catch (error) {
+        console.warn('Could not read pre-restart health:', error);
+    }
+
+    try {
+        const response = await fetch('/api/admin/restart', { method: 'POST' });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            showToast(data.detail || 'Could not restart the app.', 'error', 'Restart failed');
+            return;
+        }
+        showToast(data.message || 'Restart initiated.', 'info', 'Restart');
+    } catch (error) {
+        showToast('Network error — restart could not be started.', 'error', 'Restart failed');
+        return;
+    }
+
+    if (logLiveTimer) {
+        clearInterval(logLiveTimer);
+        logLiveTimer = null;
+    }
+
+    const overlay = byId('restart-overlay');
+    const message = byId('restart-overlay-msg');
+    overlay?.classList.add('is-visible');
+    overlay?.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+    let observedOffline = false;
+
+    const poll = setInterval(async () => {
+        try {
+            const response = await fetch('/api/admin/health', { cache: 'no-store' });
+            if (!response.ok) throw new Error('Server is not ready');
+            const health = await response.json();
+            if (observedOffline || (previousStartTime && health.start_time !== previousStartTime)) {
+                clearInterval(poll);
+                if (message) message.textContent = 'Back online. Reloading…';
+                sessionStorage.setItem('restartSuccess', '1');
+                window.setTimeout(() => window.location.reload(), 700);
+            }
+        } catch (error) {
+            observedOffline = true;
+            if (message) message.textContent = 'Server offline — waiting for it to return…';
+        }
+    }, 2000);
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     toggleSubFields();
     toggleGlobalSearchFields();
+    loadDbStats();
+    loadLogs();
+
+    if (sessionStorage.getItem('restartSuccess')) {
+        sessionStorage.removeItem('restartSuccess');
+        showToast('The app restarted successfully and is back online.', 'success', 'Restart complete', 8000);
+    }
 });

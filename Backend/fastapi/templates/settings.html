@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Settings · TG Stremio{% endblock %}
 {% block extra_head %}
-<link rel="stylesheet" href="/static/css/pages/settings.css?v=3.6.121">
+<link rel="stylesheet" href="/static/css/pages/settings.css?v=3.6.122">
 {% endblock %}
 
 {% block content %}
@@ -26,6 +26,7 @@
       <a href="#delivery"><i class="fa-solid fa-network-wired"></i> Delivery</a>
       <a href="#storage"><i class="fa-solid fa-database"></i> Storage</a>
       <a href="#clients"><i class="fa-brands fa-telegram"></i> Clients</a>
+      <a href="#maintenance"><i class="fa-solid fa-server"></i> Maintenance</a>
     </aside>
 
     <div class="settings-sections">
@@ -62,6 +63,7 @@
         <div class="field-grid two-up">
           <label><span>TMDb API key</span><input type="text" id="tmdb_api" value="{{ settings.tmdb_api }}" autocomplete="off" spellcheck="false" placeholder="Your TMDb v3 API key"></label>
           <label><span>Public base URL</span><input type="url" id="base_url" value="{{ settings.base_url }}" placeholder="https://your-space.hf.space"></label>
+          <label><span>Better Poster URL</span><input type="text" id="better_poster" value="{{ settings.better_poster }}" autocomplete="off" spellcheck="false" placeholder="https://btttr.cc/poster-a/imdb/poster-default/{imdb_id}.jpg"><small>Optional template. It must contain <code>{imdb_id}</code>; leave blank to use stored poster URLs.</small></label>
           <label><span>Upstream repository</span><input type="text" id="upstream_repo" value="{{ settings.upstream_repo }}" placeholder="owner/repository"></label>
           <label><span>Upstream branch</span><input type="text" id="upstream_branch" value="{{ settings.upstream_branch }}" placeholder="main"></label>
         </div>
@@ -131,12 +133,51 @@
         <div class="add-row"><input type="text" id="multi_tokens_new" spellcheck="false" placeholder="123456789:ABCdef…" onkeydown="if(event.key==='Enter'){event.preventDefault();addItem('multi_tokens')}"><button type="button" class="add-btn" onclick="addItem('multi_tokens')"><i class="fa-solid fa-plus"></i> Add token</button></div>
       </section>
 
+
+
+      <section id="maintenance" class="config-section maintenance-section">
+        <div class="config-section-head"><span class="config-step">09</span><div><h2>System &amp; maintenance</h2><p>Inspect database totals, follow the live application log, download diagnostics, or restart the service.</p></div></div>
+
+        <div class="maintenance-toolbar">
+          <div><h3>Database &amp; system stats</h3><p>Totals are calculated across every connected storage database.</p></div>
+          <button class="add-btn compact-action" type="button" onclick="loadDbStats(this)"><i class="fa-solid fa-rotate"></i> Refresh stats</button>
+        </div>
+        <div class="stat-grid" id="stats-grid"><div class="maintenance-hint"><i class="fa-solid fa-spinner fa-spin"></i> Loading stats…</div></div>
+
+        <div class="section-rule"></div>
+
+        <div class="maintenance-toolbar">
+          <div><h3>Application logs</h3><p>Read the latest log lines without leaving the dashboard.</p></div>
+          <div class="maintenance-actions">
+            <label class="live-log-toggle"><input type="checkbox" id="log-live-toggle" onchange="toggleLiveLogs()"><span>Live</span></label>
+            <button class="add-btn compact-action" type="button" onclick="loadLogs(this)"><i class="fa-solid fa-rotate"></i> Refresh</button>
+            <button class="add-btn compact-action" type="button" onclick="window.open('/api/admin/logs/download','_blank')"><i class="fa-solid fa-download"></i> Download</button>
+          </div>
+        </div>
+        <pre id="log-view" class="log-viewer">Loading logs…</pre>
+
+        <div class="section-rule"></div>
+
+        <div class="restart-panel">
+          <div><h3>Restart application</h3><p>Runs <code>update.py</code>, reloads the configured upstream branch, and reconnects this page after the server returns.</p></div>
+          <button id="restart-btn" type="button" class="btn-ui restart-btn" onclick="restartApp()"><i class="fa-solid fa-power-off"></i> Restart now</button>
+        </div>
+      </section>
+
       <div class="save-section"><div><strong>Ready to apply changes?</strong><p id="settings-persistence-status">Runtime settings are saved to MongoDB and verified after every save. Startup-only options stay in <code>config.env</code>.</p></div><button type="button" data-save-settings class="btn-ui btn-primary" onclick="saveSettings()"><i class="fa-solid fa-floppy-disk"></i> Save changes</button></div>
     </div>
+  </div>
+</div>
+
+<div id="restart-overlay" class="restart-overlay" aria-live="polite" aria-hidden="true">
+  <div class="restart-overlay-card">
+    <i class="fa-solid fa-rotate fa-spin"></i>
+    <h3>Restarting…</h3>
+    <p id="restart-overlay-msg">Applying updates and waiting for the server to return.</p>
   </div>
 </div>
 {% endblock %}
 
 {% block extra_scripts %}
-<script src="/static/js/pages/settings.js?v=3.6.121" defer></script>
+<script src="/static/js/pages/settings.js?v=3.6.122" defer></script>
 {% endblock %}
